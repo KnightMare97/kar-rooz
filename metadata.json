@@ -1,0 +1,7 @@
+{
+  "name": "کار روز | KarRooz",
+  "description": "مدیریت آرام و متمرکز کارهای روزانه و ثبت سریع یادداشت‌ها به زبان فارسی با ذخیره‌سازی محلی.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
