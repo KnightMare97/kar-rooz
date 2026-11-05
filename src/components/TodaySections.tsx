@@ -26,6 +26,8 @@ interface TodaySectionsProps {
   onToggleComplete: (id: string, e: React.MouseEvent) => void;
   onSelectItem: (item: Item) => void;
   onMoveToToday: (item: Item, e: React.MouseEvent) => void;
+  onOpenSeriesModal?: (seriesId: string) => void;
+  onSkipOccurrence?: (item: Item, e: React.MouseEvent) => void;
 }
 
 export const TodaySections: React.FC<TodaySectionsProps> = ({
@@ -42,6 +44,8 @@ export const TodaySections: React.FC<TodaySectionsProps> = ({
   onToggleComplete,
   onSelectItem,
   onMoveToToday,
+  onOpenSeriesModal,
+  onSkipOccurrence,
 }) => {
   const [isOverduePlannedOpen, setIsOverduePlannedOpen] = useState(true);
   const [isOverdueDeadlinesOpen, setIsOverdueDeadlinesOpen] = useState(true);
@@ -87,6 +91,8 @@ export const TodaySections: React.FC<TodaySectionsProps> = ({
                   onClick={onSelectItem}
                   onMoveToToday={onMoveToToday}
                   showMoveToTodayAction={!item.plannedDate || item.plannedDate < item.dueDate!}
+                  onOpenSeriesModal={onOpenSeriesModal}
+                  onSkipOccurrence={onSkipOccurrence}
                 />
               ))}
             </div>
@@ -130,6 +136,8 @@ export const TodaySections: React.FC<TodaySectionsProps> = ({
                   onClick={onSelectItem}
                   onMoveToToday={onMoveToToday}
                   showMoveToTodayAction={true}
+                  onOpenSeriesModal={onOpenSeriesModal}
+                  onSkipOccurrence={onSkipOccurrence}
                 />
               ))}
             </div>
@@ -155,6 +163,8 @@ export const TodaySections: React.FC<TodaySectionsProps> = ({
               isSimpleMode={isSimpleMode}
               onToggleComplete={onToggleComplete}
               onClick={onSelectItem}
+              onOpenSeriesModal={onOpenSeriesModal}
+              onSkipOccurrence={onSkipOccurrence}
             />
           ))
         ) : !hasAnyItems ? (

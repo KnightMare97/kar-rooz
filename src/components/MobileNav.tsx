@@ -1,6 +1,6 @@
 import React from 'react';
 import { FilterType, ActiveView } from '../types';
-import { Sun, Folder, Plus, FileText, Calendar as CalendarIcon } from 'lucide-react';
+import { Sun, Folder, Plus, FileText, Layers } from 'lucide-react';
 import { toPersianDigits } from '../utils/date';
 
 interface MobileNavProps {
@@ -16,23 +16,22 @@ interface MobileNavProps {
 
 export const MobileNav: React.FC<MobileNavProps> = ({
   activeView,
-  filter,
   onNavigate,
   onOpenQuickCapture,
   activeCount,
   projectsCount,
 }) => {
-  const isTodayActive = activeView === 'today' && (filter === 'all' || filter === 'tasks');
-  const isCalendarActive = activeView === 'calendar';
-  const isNotesActive = activeView === 'today' && filter === 'notes';
+  const isTodayActive = activeView === 'today';
+  const isAllWorkActive = activeView === 'all-work';
   const isProjectsActive = activeView === 'projects' || activeView === 'project-detail';
+  const isNotesActive = activeView === 'notes';
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-[#14151C]/95 backdrop-blur-md border-t border-[#232532] px-2 py-1.5 flex items-center justify-around select-none">
-      {/* Today Tab */}
+      {/* 1. Today Tab */}
       <button
         type="button"
-        onClick={() => onNavigate('today', 'all')}
+        onClick={() => onNavigate('today')}
         className={`flex flex-col items-center gap-0.5 py-1 px-2 rounded-lg transition-colors cursor-pointer ${
           isTodayActive ? 'text-violet-400 font-semibold' : 'text-gray-400 hover:text-gray-200'
         }`}
@@ -48,19 +47,19 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         <span className="text-[10px]">امروز</span>
       </button>
 
-      {/* Calendar Tab */}
+      {/* 2. All Work Tab */}
       <button
         type="button"
-        onClick={() => onNavigate('calendar')}
+        onClick={() => onNavigate('all-work')}
         className={`flex flex-col items-center gap-0.5 py-1 px-2 rounded-lg transition-colors cursor-pointer ${
-          isCalendarActive ? 'text-violet-400 font-semibold' : 'text-gray-400 hover:text-gray-200'
+          isAllWorkActive ? 'text-violet-400 font-semibold' : 'text-gray-400 hover:text-gray-200'
         }`}
       >
-        <CalendarIcon className="w-5 h-5" />
-        <span className="text-[10px]">تقویم</span>
+        <Layers className="w-5 h-5" />
+        <span className="text-[10px]">همه کارها</span>
       </button>
 
-      {/* Quick Add Button */}
+      {/* 3. Quick Add Button */}
       <button
         type="button"
         onClick={onOpenQuickCapture}
@@ -70,7 +69,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         <Plus className="w-5 h-5 stroke-[2.5]" />
       </button>
 
-      {/* Projects Tab */}
+      {/* 4. Projects Tab */}
       <button
         type="button"
         onClick={() => onNavigate('projects')}
@@ -89,10 +88,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({
         <span className="text-[10px]">پروژه‌ها</span>
       </button>
 
-      {/* Notes Tab */}
+      {/* 5. Notes Tab */}
       <button
         type="button"
-        onClick={() => onNavigate('today', 'notes')}
+        onClick={() => onNavigate('notes')}
         className={`flex flex-col items-center gap-0.5 py-1 px-2 rounded-lg transition-colors cursor-pointer ${
           isNotesActive ? 'text-violet-400 font-semibold' : 'text-gray-400 hover:text-gray-200'
         }`}

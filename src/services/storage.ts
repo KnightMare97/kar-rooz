@@ -3,19 +3,21 @@
  * Safe migration with Schema Versioning (v1 -> v2 -> v3: Date-Based Planning)
  * Safe against disabled localStorage or private browsing restrictions
  */
-import { Item, Project } from '../types';
+import { Item, Project, WorkViewTab, UNASSIGNED_PROJECT_ID } from '../types';
 import { getTehranTodayDateString, addDays } from '../utils/date';
 
 const SCHEMA_VERSION_KEY = 'karrooz_schema_version';
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const ITEMS_V1_KEY = 'karrooz_items_v1';
 const ITEMS_V2_KEY = 'karrooz_items_v2';
 const ITEMS_V3_KEY = 'karrooz_items_v3';
+const ITEMS_V4_KEY = 'karrooz_items_v4';
 const PROJECTS_V2_KEY = 'karrooz_projects_v2';
 const INITIALIZED_FLAG_KEY = 'karrooz_initialized_v1';
 const SIMPLE_MODE_KEY = 'karrooz_simple_mode_v1';
 const PRE_V3_SNAPSHOT_KEY = 'karrooz_snapshot_pre_v3';
+const PRE_V4_SNAPSHOT_KEY = 'karrooz_snapshot_pre_v4';
 
 // Known legacy area labels that must NOT be converted to real projects
 const OLD_AREA_LABELS = new Set(['کاری', 'شخصی', 'سلامت', 'یادگیری', 'مطالعه']);
@@ -147,16 +149,17 @@ function runMigrationIfNeeded(): { items: Item[]; projects: Project[] } {
   try {
     const currentVersion = parseInt(window.localStorage.getItem(SCHEMA_VERSION_KEY) || '0', 10);
     const isInitialized = window.localStorage.getItem(INITIALIZED_FLAG_KEY);
+    const v4ItemsRaw = window.localStorage.getItem(ITEMS_V4_KEY);
     const v3ItemsRaw = window.localStorage.getItem(ITEMS_V3_KEY);
     const v2ProjectsRaw = window.localStorage.getItem(PROJECTS_V2_KEY);
     const v2ItemsRaw = window.localStorage.getItem(ITEMS_V2_KEY);
     const v1ItemsRaw = window.localStorage.getItem(ITEMS_V1_KEY);
 
     // Case 1: First time run, no saved data at all
-    if (!isInitialized && !v1ItemsRaw && !v2ItemsRaw && !v3ItemsRaw) {
+    if (!isInitialized && !v1ItemsRaw && !v2ItemsRaw && !v3ItemsRaw && !v4ItemsRaw) {
       const seedItems = getSeedItems();
       window.localStorage.setItem(PROJECTS_V2_KEY, JSON.stringify(SEED_PROJECTS));
-      window.localStorage.setItem(ITEMS_V3_KEY, JSON.stringify(seedItems));
+      window.localStorage.setItem(ITEMS_V4_KEY, JSON.stringify(seedItems));
       window.localStorage.setItem(SCHEMA_VERSION_KEY, String(CURRENT_SCHEMA_VERSION));
       window.localStorage.setItem(INITIALIZED_FLAG_KEY, 'true');
       return { items: seedItems, projects: SEED_PROJECTS };
@@ -176,32 +179,52 @@ function runMigrationIfNeeded(): { items: Item[]; projects: Project[] } {
       window.localStorage.setItem(PROJECTS_V2_KEY, JSON.stringify(projects));
     }
 
-    // Case 2: Already on schema version 3
-    if (currentVersion >= 3 && v3ItemsRaw) {
+    // Case 2: Already on schema version 4
+    if (currentVersion >= 4 && v4ItemsRaw) {
       try {
-        const items = JSON.parse(v3ItemsRaw) as Item[];
+        const items = JSON.parse(v4ItemsRaw) as Item[];
         return { items, projects };
       } catch (err) {
-        console.warn('Could not parse v3 items, falling back', err);
+        console.warn('Could not parse v4 items, falling back', err);
       }
     }
 
-    // Case 3: Need migration from v2 (or v1) to v3
+    // Case 3: Need migration to v4 (from v3, v2, or v1)
     // Create pre-migration safety snapshot first
     try {
       const snapshotPayload = {
         fromVersion: currentVersion,
         timestamp: new Date().toISOString(),
+        v3Items: v3ItemsRaw,
         v2Items: v2ItemsRaw,
         v1Items: v1ItemsRaw,
         projects: v2ProjectsRaw,
       };
-      window.localStorage.setItem(PRE_V3_SNAPSHOT_KEY, JSON.stringify(snapshotPayload));
+      window.localStorage.setItem(PRE_V4_SNAPSHOT_KEY, JSON.stringify(snapshotPayload));
     } catch (e) {
-      console.warn('Could not save pre-v3 snapshot', e);
+      console.warn('Could not save pre-v4 snapshot', e);
     }
 
     const tehranToday = getTehranTodayDateString();
+
+    // If we have v3 items, migration to v4 is seamless and preserves all data & recurrence
+    if (v3ItemsRaw) {
+      try {
+        const parsedV3 = JSON.parse(v3ItemsRaw) as any[];
+        const migratedV4: Item[] = parsedV3.map((item) => ({
+          ...item,
+          // Recurrence preserved if present, never seeded over existing data
+          recurrence: item.recurrence || undefined,
+          occurrenceOverrides: item.occurrenceOverrides || undefined,
+        }));
+
+        window.localStorage.setItem(ITEMS_V4_KEY, JSON.stringify(migratedV4));
+        window.localStorage.setItem(SCHEMA_VERSION_KEY, String(CURRENT_SCHEMA_VERSION));
+        return { items: migratedV4, projects };
+      } catch (err) {
+        console.warn('Failed parsing v3 items, falling back to earlier migration', err);
+      }
+    }
 
     let baseItems: any[] = [];
     if (v2ItemsRaw) {
@@ -248,13 +271,9 @@ function runMigrationIfNeeded(): { items: Item[]; projects: Project[] } {
         status = undefined;
       }
 
-      // Date migration logic:
-      // If item already had plannedDate or dueDate, preserve them!
       let plannedDate: string | undefined = old.plannedDate;
       const dueDate: string | undefined = isTask ? old.dueDate : undefined;
 
-      // For legacy items explicitly marked in Today without plannedDate:
-      // Assign the migration-day date in Asia/Tehran once!
       if (!plannedDate && old.inToday) {
         plannedDate = tehranToday;
       }
@@ -278,11 +297,13 @@ function runMigrationIfNeeded(): { items: Item[]; projects: Project[] } {
         dueDate,
         inToday,
         destination: old.destination === 'today' ? 'today' : undefined,
+        recurrence: old.recurrence || undefined,
+        occurrenceOverrides: old.occurrenceOverrides || undefined,
       };
     });
 
-    // Save v3 items and update version
-    window.localStorage.setItem(ITEMS_V3_KEY, JSON.stringify(migratedItems));
+    // Save v4 items and update version
+    window.localStorage.setItem(ITEMS_V4_KEY, JSON.stringify(migratedItems));
     window.localStorage.setItem(SCHEMA_VERSION_KEY, String(CURRENT_SCHEMA_VERSION));
     window.localStorage.setItem(INITIALIZED_FLAG_KEY, 'true');
 
@@ -349,7 +370,7 @@ export function loadItems(): Item[] {
 export function saveItems(items: Item[]): boolean {
   if (isLocalStorageAvailable()) {
     try {
-      window.localStorage.setItem(ITEMS_V3_KEY, JSON.stringify(items));
+      window.localStorage.setItem(ITEMS_V4_KEY, JSON.stringify(items));
       return true;
     } catch (e) {
       console.warn('Failed to save items to localStorage', e);
@@ -378,6 +399,128 @@ export function saveSimpleMode(enabled: boolean): void {
   if (isLocalStorageAvailable()) {
     try {
       window.localStorage.setItem(SIMPLE_MODE_KEY, String(enabled));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+// UI Preference Storage Keys (Kept strictly independent of domain data)
+const ALLWORK_TAB_KEY = 'karrooz_allwork_tab_v1';
+const PROJECT_TAB_KEY = 'karrooz_project_tab_v1';
+const ALLWORK_PROJECT_FILTERS_KEY = 'karrooz_allwork_project_filters_v1';
+const ALLWORK_SHOW_ARCHIVED_KEY = 'karrooz_allwork_show_archived_v1';
+
+let memoryAllWorkTab: WorkViewTab = 'list';
+let memoryProjectTab: WorkViewTab = 'kanban';
+let memoryAllWorkProjectFilters: string[] | null = null;
+let memoryAllWorkShowArchived = false;
+
+export function loadAllWorkTab(): WorkViewTab {
+  if (isLocalStorageAvailable()) {
+    try {
+      const val = window.localStorage.getItem(ALLWORK_TAB_KEY) as WorkViewTab;
+      if (val === 'list' || val === 'kanban' || val === 'calendar') {
+        return val;
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return memoryAllWorkTab;
+}
+
+export function saveAllWorkTab(tab: WorkViewTab): void {
+  memoryAllWorkTab = tab;
+  if (isLocalStorageAvailable()) {
+    try {
+      window.localStorage.setItem(ALLWORK_TAB_KEY, tab);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function loadProjectTab(): WorkViewTab {
+  if (isLocalStorageAvailable()) {
+    try {
+      const val = window.localStorage.getItem(PROJECT_TAB_KEY) as WorkViewTab;
+      if (val === 'list' || val === 'kanban' || val === 'calendar') {
+        return val;
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return memoryProjectTab;
+}
+
+export function saveProjectTab(tab: WorkViewTab): void {
+  memoryProjectTab = tab;
+  if (isLocalStorageAvailable()) {
+    try {
+      window.localStorage.setItem(PROJECT_TAB_KEY, tab);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Loads project filters safely: handles missing or deleted project IDs gracefully.
+ * Returns null if no custom filter was ever saved (indicating default: all active + unassigned).
+ */
+export function loadAllWorkProjectFilters(validProjectIds: string[]): string[] | null {
+  if (isLocalStorageAvailable()) {
+    try {
+      const raw = window.localStorage.getItem(ALLWORK_PROJECT_FILTERS_KEY);
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const validSet = new Set([...validProjectIds, UNASSIGNED_PROJECT_ID]);
+          // Filter out any stale/deleted IDs
+          return parsed.filter((id) => typeof id === 'string' && validSet.has(id));
+        }
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return memoryAllWorkProjectFilters;
+}
+
+export function saveAllWorkProjectFilters(filters: string[] | null): void {
+  memoryAllWorkProjectFilters = filters;
+  if (isLocalStorageAvailable()) {
+    try {
+      if (filters === null) {
+        window.localStorage.removeItem(ALLWORK_PROJECT_FILTERS_KEY);
+      } else {
+        window.localStorage.setItem(ALLWORK_PROJECT_FILTERS_KEY, JSON.stringify(filters));
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function loadAllWorkShowArchived(): boolean {
+  if (isLocalStorageAvailable()) {
+    try {
+      const val = window.localStorage.getItem(ALLWORK_SHOW_ARCHIVED_KEY);
+      return val === 'true';
+    } catch {
+      // fallback
+    }
+  }
+  return memoryAllWorkShowArchived;
+}
+
+export function saveAllWorkShowArchived(show: boolean): void {
+  memoryAllWorkShowArchived = show;
+  if (isLocalStorageAvailable()) {
+    try {
+      window.localStorage.setItem(ALLWORK_SHOW_ARCHIVED_KEY, String(show));
     } catch {
       // ignore
     }

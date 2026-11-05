@@ -1,10 +1,18 @@
 /**
  * KarRooz (کار روز) - Personal Task, Note & Project Manager
  * Calm, focused, device-local, RTL Persian productivity tool.
- * Iteration 3: Persian Calendar and Date-Based Planning.
+ * Iteration: Unified Work Views (All Work & Project scopes: List, Kanban, Calendar).
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Item, Project, FilterType, ActiveView, KanbanStatus } from './types';
+import {
+  Item,
+  Project,
+  FilterType,
+  ActiveView,
+  KanbanStatus,
+  WorkViewTab,
+  UNASSIGNED_PROJECT_ID,
+} from './types';
 import {
   loadItems,
   saveItems,
@@ -12,20 +20,32 @@ import {
   saveProjects,
   loadSimpleMode,
   saveSimpleMode,
+  loadAllWorkTab,
+  saveAllWorkTab,
+  loadProjectTab,
+  saveProjectTab,
+  loadAllWorkProjectFilters,
+  saveAllWorkProjectFilters,
+  loadAllWorkShowArchived,
+  saveAllWorkShowArchived,
 } from './services/storage';
-import { getTehranTodayDateString } from './utils/date';
+import { getTehranTodayDateString, formatJalaliDate } from './utils/date';
+import { expandAllItems } from './utils/recurrence';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { QuickCapture } from './components/QuickCapture';
 import { TodaySections } from './components/TodaySections';
-import { CalendarView } from './components/CalendarView';
+import { AllWorkView } from './components/AllWorkView';
+import { NotesView } from './components/NotesView';
 import { ItemEditorModal } from './components/ItemEditorModal';
+import { SeriesModal } from './components/SeriesModal';
 import { MobileNav } from './components/MobileNav';
 import { ProjectList } from './components/ProjectList';
 import { ProjectDetail } from './components/ProjectDetail';
 import { ProjectModal } from './components/ProjectModal';
 import { BackupModal } from './components/BackupModal';
+import { Info, X, AlertCircle } from 'lucide-react';
 
 export default function App() {
   const [items, setItems] = useState<Item[]>(() => loadItems());
@@ -40,11 +60,31 @@ export default function App() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Unified Work Views Tab State
+  const [allWorkTab, setAllWorkTab] = useState<WorkViewTab>(() => loadAllWorkTab());
+  const [projectTab, setProjectTab] = useState<WorkViewTab>(() => loadProjectTab());
+
+  // All Work Scope & Filters
+  const [allWorkProjectFilters, setAllWorkProjectFilters] = useState<string[] | null>(() =>
+    loadAllWorkProjectFilters(projects.map((p) => p.id))
+  );
+  const [allWorkShowArchived, setAllWorkShowArchived] = useState<boolean>(() =>
+    loadAllWorkShowArchived()
+  );
+  const [allWorkSearchQuery, setAllWorkSearchQuery] = useState('');
+
+  // Toast notification for items saved outside active filter
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
+
   // Modals
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [selectedSeriesModalId, setSelectedSeriesModalId] = useState<string | null>(null);
+  const [skipConfirmOccurrence, setSkipConfirmOccurrence] = useState<Item | null>(null);
+  const [undoSkipInfo, setUndoSkipInfo] = useState<{ seriesId: string; originalDate: string; title: string } | null>(null);
 
   const captureSectionRef = useRef<HTMLDivElement>(null);
 
@@ -79,6 +119,37 @@ export default function App() {
     saveSimpleMode(next);
   };
 
+  const handleAllWorkTabChange = (tab: WorkViewTab) => {
+    setAllWorkTab(tab);
+    saveAllWorkTab(tab);
+  };
+
+  const handleProjectTabChange = (tab: WorkViewTab) => {
+    setProjectTab(tab);
+    saveProjectTab(tab);
+  };
+
+  const handleAllWorkProjectFiltersChange = (filters: string[] | null) => {
+    setAllWorkProjectFilters(filters);
+    saveAllWorkProjectFilters(filters);
+  };
+
+  const handleAllWorkShowArchivedChange = (show: boolean) => {
+    setAllWorkShowArchived(show);
+    saveAllWorkShowArchived(show);
+  };
+
+  const showToast = (message: string) => {
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMessage(message);
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimeoutRef.current = null;
+    }, 5000);
+  };
+
   const handleNavigate = (view: ActiveView, newFilter?: FilterType) => {
     setActiveView(view);
     if (newFilter) {
@@ -106,10 +177,47 @@ export default function App() {
       createdAt: new Date().toISOString(),
     };
     setItems((prev) => [newItem, ...prev]);
+
+    // Check if new item leaves active All Work filter
+    if (activeView === 'all-work' && allWorkProjectFilters !== null) {
+      const itemKey = newItem.projectId || UNASSIGNED_PROJECT_ID;
+      if (!allWorkProjectFilters.includes(itemKey)) {
+        showToast('مورد جدید ذخیره شد، اما با توجه به فیلتر پروژه‌های انتخابی در این نما پنهان است.');
+      }
+    }
   };
 
   const handleToggleComplete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+
+    // Check if this is an occurrence ID (seriesId__originalDate)
+    if (id.includes('__')) {
+      const [seriesId, origDate] = id.split('__');
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id === seriesId) {
+            const currentOverride = item.occurrenceOverrides?.[origDate];
+            const nextCompleted = !(currentOverride?.completed ?? item.completed);
+            const nextStatus: KanbanStatus = nextCompleted ? 'done' : 'todo';
+            return {
+              ...item,
+              occurrenceOverrides: {
+                ...(item.occurrenceOverrides || {}),
+                [origDate]: {
+                  ...(currentOverride || {}),
+                  completed: nextCompleted,
+                  status: nextStatus,
+                  completedAt: nextCompleted ? new Date().toISOString() : undefined,
+                },
+              },
+            };
+          }
+          return item;
+        })
+      );
+      return;
+    }
+
     setItems((prev) =>
       prev.map((item) => {
         if (item.id === id && item.type === 'task') {
@@ -128,11 +236,180 @@ export default function App() {
   };
 
   const handleSaveItem = (updatedItem: Item) => {
+    // If saving an individual occurrence
+    if (updatedItem.isRecurringOccurrence && updatedItem.recurringSeriesId && updatedItem.originalScheduledDate) {
+      const seriesId = updatedItem.recurringSeriesId;
+      const origDate = updatedItem.originalScheduledDate;
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id === seriesId) {
+            const currentOverride = item.occurrenceOverrides?.[origDate] || {};
+            return {
+              ...item,
+              occurrenceOverrides: {
+                ...(item.occurrenceOverrides || {}),
+                [origDate]: {
+                  ...currentOverride,
+                  title: updatedItem.title,
+                  description: updatedItem.description,
+                  completed: updatedItem.completed,
+                  status: updatedItem.status,
+                  completedAt: updatedItem.completedAt,
+                  plannedDate: updatedItem.plannedDate,
+                  dueDate: updatedItem.dueDate,
+                  projectId: updatedItem.projectId,
+                  tags: updatedItem.tags,
+                },
+              },
+            };
+          }
+          return item;
+        })
+      );
+      showToast('تغییرات فقط برای همین نوبت ذخیره شد.');
+      return;
+    }
+
+    // Normal item or recurring series parent
     setItems((prev) => prev.map((item) => (item.id === updatedItem.id ? updatedItem : item)));
+
+    // Check if item left active All Work filter
+    if (activeView === 'all-work' && allWorkProjectFilters !== null) {
+      const itemKey = updatedItem.projectId || UNASSIGNED_PROJECT_ID;
+      if (!allWorkProjectFilters.includes(itemKey)) {
+        showToast('مورد ویرایش‌شده خارج از فیلترهای فعال فعلی قرار دارد و با موفقیت ذخیره شد.');
+      }
+    }
   };
 
   const handleDeleteItem = (itemId: string) => {
+    if (itemId.includes('__')) {
+      const [seriesId, origDate] = itemId.split('__');
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id === seriesId) {
+            const currentOverride = item.occurrenceOverrides?.[origDate] || {};
+            return {
+              ...item,
+              occurrenceOverrides: {
+                ...(item.occurrenceOverrides || {}),
+                [origDate]: {
+                  ...currentOverride,
+                  skipped: true,
+                },
+              },
+            };
+          }
+          return item;
+        })
+      );
+      showToast('نوبت نادیده گرفته شد و از لیست حذف گردید.');
+      return;
+    }
     setItems((prev) => prev.filter((item) => item.id !== itemId));
+  };
+
+  const handleRequestSkipOccurrence = (item: Item, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSkipConfirmOccurrence(item);
+  };
+
+  const handleConfirmSkipOccurrence = () => {
+    if (!skipConfirmOccurrence) return;
+    const seriesId = skipConfirmOccurrence.recurringSeriesId || skipConfirmOccurrence.id.split('__')[0];
+    const origDate = skipConfirmOccurrence.originalScheduledDate || skipConfirmOccurrence.id.split('__')[1];
+    const itemTitle = skipConfirmOccurrence.title;
+
+    if (seriesId && origDate) {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id === seriesId) {
+            const currentOverride = item.occurrenceOverrides?.[origDate] || {};
+            return {
+              ...item,
+              occurrenceOverrides: {
+                ...(item.occurrenceOverrides || {}),
+                [origDate]: {
+                  ...currentOverride,
+                  skipped: true,
+                },
+              },
+            };
+          }
+          return item;
+        })
+      );
+      setUndoSkipInfo({ seriesId, originalDate: origDate, title: itemTitle });
+      showToast(`نوبت «${itemTitle}» نادیده گرفته شد.`);
+    }
+    setSkipConfirmOccurrence(null);
+  };
+
+  const handleUndoSkip = () => {
+    if (!undoSkipInfo) return;
+    const { seriesId, originalDate, title } = undoSkipInfo;
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id === seriesId && item.occurrenceOverrides?.[originalDate]) {
+          const nextOverrides = { ...item.occurrenceOverrides };
+          const cur = { ...nextOverrides[originalDate] };
+          delete cur.skipped;
+          if (Object.keys(cur).length === 0) {
+            delete nextOverrides[originalDate];
+          } else {
+            nextOverrides[originalDate] = cur;
+          }
+          return {
+            ...item,
+            occurrenceOverrides: nextOverrides,
+          };
+        }
+        return item;
+      })
+    );
+    setUndoSkipInfo(null);
+    showToast(`نوبت «${title}» بازگردانی شد.`);
+  };
+
+  const handleStopSeries = (seriesId: string, cutoffDate: string) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id === seriesId && item.recurrence) {
+          return {
+            ...item,
+            recurrence: {
+              ...item.recurrence,
+              stoppedAt: cutoffDate,
+            },
+          };
+        }
+        return item;
+      })
+    );
+    showToast('تکرارهای آینده این کار از تاریخ انتخابی متوقف شد.');
+  };
+
+  const handleRestoreOccurrenceInModal = (seriesId: string, originalDate: string) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id === seriesId && item.occurrenceOverrides?.[originalDate]) {
+          const nextOverrides = { ...item.occurrenceOverrides };
+          const cur = { ...nextOverrides[originalDate] };
+          delete cur.skipped;
+          if (Object.keys(cur).length === 0) {
+            delete nextOverrides[originalDate];
+          } else {
+            nextOverrides[originalDate] = cur;
+          }
+          return {
+            ...item,
+            occurrenceOverrides: nextOverrides,
+          };
+        }
+        return item;
+      })
+    );
+    showToast('نوبت با موفقیت بازگردانی شد.');
   };
 
   // Explicit action to move a past item to today while preserving all other properties
@@ -218,6 +495,15 @@ export default function App() {
     }
   };
 
+  // Expanded items for Today View (includes today's items + overdue unfinished occurrences from past 90 days)
+  const expandedItemsForToday = useMemo(() => {
+    return expandAllItems(items, todayDate, todayDate, {
+      includeOverdueUnresolved: true,
+      pastHorizonDays: 90,
+      todayStr: todayDate,
+    });
+  }, [items, todayDate]);
+
   // Date-Based Logic for Today View
   // 1. Overdue Deadlines: Incomplete tasks with dueDate < todayDate
   // 2. Overdue Planned: Incomplete tasks with plannedDate < todayDate
@@ -232,7 +518,7 @@ export default function App() {
     totalNotesCount,
   } = useMemo(() => {
     // Filter by search query
-    let filtered = items;
+    let filtered = expandedItemsForToday;
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       filtered = filtered.filter((item) => {
@@ -310,7 +596,7 @@ export default function App() {
       todayActiveCount: uniqueOpenTaskIds.size,
       totalNotesCount: notesCount,
     };
-  }, [items, searchQuery, filter, todayDate]);
+  }, [expandedItemsForToday, items, searchQuery, filter, todayDate]);
 
   const activeProjectsCount = useMemo(() => {
     return projects.filter((p) => !p.archived).length;
@@ -320,6 +606,11 @@ export default function App() {
     if (!selectedProjectId) return null;
     return projects.find((p) => p.id === selectedProjectId) || null;
   }, [projects, selectedProjectId]);
+
+  const selectedSeriesItem = useMemo(() => {
+    if (!selectedSeriesModalId) return null;
+    return items.find((p) => p.id === selectedSeriesModalId) || null;
+  }, [items, selectedSeriesModalId]);
 
   const handleOpenQuickCaptureFromMobile = () => {
     if (activeView !== 'today') {
@@ -343,6 +634,7 @@ export default function App() {
         onToggleSimpleMode={handleToggleSimpleMode}
         onOpenBackupModal={() => setIsBackupModalOpen(true)}
         activeCount={todayActiveCount}
+        allWorkCount={items.length}
         notesCount={totalNotesCount}
         projectsCount={activeProjectsCount}
       />
@@ -396,23 +688,46 @@ export default function App() {
                 onToggleComplete={handleToggleComplete}
                 onSelectItem={(item) => setEditingItem(item)}
                 onMoveToToday={handleMoveToToday}
+                onOpenSeriesModal={(seriesId) => setSelectedSeriesModalId(seriesId)}
+                onSkipOccurrence={handleRequestSkipOccurrence}
               />
             </>
           )}
 
-          {/* VIEW 2: CALENDAR VIEW */}
-          {activeView === 'calendar' && (
-            <CalendarView
+          {/* VIEW 2: ALL WORK (List / Kanban / Calendar) */}
+          {activeView === 'all-work' && (
+            <AllWorkView
               items={items}
               projects={projects}
+              activeTab={allWorkTab}
+              onTabChange={handleAllWorkTabChange}
+              selectedProjectIds={allWorkProjectFilters}
+              onProjectFilterChange={handleAllWorkProjectFiltersChange}
+              showArchivedProjects={allWorkShowArchived}
+              onShowArchivedProjectsChange={handleAllWorkShowArchivedChange}
+              searchQuery={allWorkSearchQuery}
+              onSearchQueryChange={setAllWorkSearchQuery}
               isSimpleMode={isSimpleMode}
-              onSelectItem={(item) => setEditingItem(item)}
-              onToggleComplete={handleToggleComplete}
               onAddItem={handleAddItem}
+              onUpdateItem={handleSaveItem}
+              onToggleComplete={handleToggleComplete}
+              onSelectItem={(item) => setEditingItem(item)}
+              onShowToast={showToast}
             />
           )}
 
-          {/* VIEW 3: PROJECTS LIST VIEW */}
+          {/* VIEW 3: NOTES VIEW */}
+          {activeView === 'notes' && (
+            <NotesView
+              items={items}
+              projects={projects}
+              isSimpleMode={isSimpleMode}
+              onAddItem={handleAddItem}
+              onSelectItem={(item) => setEditingItem(item)}
+            />
+          )}
+
+          {/* VIEW 4: PROJECTS LIST VIEW */}
           {activeView === 'projects' && (
             <ProjectList
               projects={projects}
@@ -424,12 +739,14 @@ export default function App() {
             />
           )}
 
-          {/* VIEW 4: PROJECT DETAIL & KANBAN VIEW */}
+          {/* VIEW 5: PROJECT DETAIL (List / Kanban / Calendar) */}
           {activeView === 'project-detail' && selectedProject && (
             <ProjectDetail
               project={selectedProject}
               items={items}
               projects={projects}
+              viewMode={projectTab}
+              onViewModeChange={handleProjectTabChange}
               isSimpleMode={isSimpleMode}
               onBack={() => setActiveView('projects')}
               onEditProject={handleOpenEditProject}
@@ -456,6 +773,42 @@ export default function App() {
         </main>
       </div>
 
+      {/* Floating Toast Notification for Filter Boundary Safety and Undo Actions */}
+      {toastMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-md w-[calc(100%-2rem)] bg-[#1A1C26] border border-violet-500/40 text-violet-200 text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xl shadow-black/50 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Info className="w-4 h-4 text-violet-400 shrink-0" />
+            <span className="truncate">{toastMessage}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {undoSkipInfo && (
+              <button
+                type="button"
+                onClick={handleUndoSkip}
+                className="text-xs font-semibold text-violet-300 hover:text-white bg-violet-900/50 hover:bg-violet-800/70 px-2 py-0.8 rounded border border-violet-700/60 cursor-pointer transition-colors"
+              >
+                بازگردانی
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setToastMessage(null);
+                setUndoSkipInfo(null);
+              }}
+              className="text-gray-400 hover:text-white p-0.5 rounded cursor-pointer"
+              aria-label="بستن پیام"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Item Detail / Editor Modal */}
       <ItemEditorModal
         item={editingItem}
@@ -464,7 +817,68 @@ export default function App() {
         onClose={() => setEditingItem(null)}
         onSave={handleSaveItem}
         onDelete={handleDeleteItem}
+        onOpenSeriesModal={(seriesId) => setSelectedSeriesModalId(seriesId)}
       />
+
+      {/* Series Management Modal */}
+      {selectedSeriesItem && (
+        <SeriesModal
+          isOpen={Boolean(selectedSeriesModalId)}
+          onClose={() => setSelectedSeriesModalId(null)}
+          seriesItem={selectedSeriesItem}
+          onStopSeries={handleStopSeries}
+          onRestoreOccurrence={handleRestoreOccurrenceInModal}
+        />
+      )}
+
+      {/* Skip Occurrence Confirmation Dialog */}
+      {skipConfirmOccurrence && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs"
+          onClick={() => setSkipConfirmOccurrence(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-[#181920] border border-[#2D2F3C] rounded-2xl p-5 shadow-2xl text-right animate-in zoom-in-95 duration-150 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 text-amber-400">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <h3 className="text-sm font-semibold text-gray-100">صرف‌نظر از این نوبت؟</h3>
+            </div>
+            <p className="text-xs text-gray-300 leading-relaxed">
+              آیا از نادیده گرفتن نوبت «{skipConfirmOccurrence.title}» در تاریخ{' '}
+              <span className="font-semibold text-violet-300">
+                {formatJalaliDate(
+                  skipConfirmOccurrence.originalScheduledDate || skipConfirmOccurrence.plannedDate || todayDate,
+                  'full'
+                )}
+              </span>{' '}
+              اطمینان دارید؟
+            </p>
+            <p className="text-[11px] text-gray-400 leading-relaxed">
+              این عمل زنجیره تکرار و سایر نوبت‌ها را تغییر نمی‌دهد و این نوبت از بخش مدیریت زنجیره قابل بازگردانی خواهد بود.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#262835]">
+              <button
+                type="button"
+                onClick={() => setSkipConfirmOccurrence(null)}
+                className="px-3.5 py-1.5 text-xs font-medium text-gray-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSkipOccurrence}
+                className="px-3.5 py-1.5 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors cursor-pointer shadow-sm"
+              >
+                صرف‌نظر از نوبت
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create / Edit Project Modal */}
       <ProjectModal

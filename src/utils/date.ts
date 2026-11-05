@@ -290,6 +290,22 @@ export function formatTimeAgo(isoString: string): string {
   }
 }
 
+/**
+ * Returns the 7 calendar dates (YYYY-MM-DD, Saturday to Friday) for the week containing dateStr.
+ */
+export function getWeekDaysForDate(dateStr: string): string[] {
+  const parsed = parseDateString(dateStr);
+  if (!parsed) return [dateStr];
+  const d = new Date(parsed.year, parsed.month - 1, parsed.day);
+  const saturdayOffset = (d.getDay() + 1) % 7;
+  const saturday = addDays(dateStr, -saturdayOffset);
+  const weekDays: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    weekDays.push(addDays(saturday, i));
+  }
+  return weekDays;
+}
+
 export interface CalendarDayCell {
   dateStr: string; // YYYY-MM-DD
   dayNumber: number; // day of month in current system (1..31)

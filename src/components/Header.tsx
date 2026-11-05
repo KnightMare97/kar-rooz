@@ -50,16 +50,30 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {activeView === 'calendar' && (
+          {activeView === 'all-work' && (
             <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
               <h1 className="text-base sm:text-lg font-bold text-white tracking-tight shrink-0">
-                تقویم و برنامه‌ریزی
+                همه کارها
               </h1>
               <span className="text-xs text-gray-500 hidden sm:inline" aria-hidden="true">
                 ·
               </span>
               <span className="text-xs text-gray-400 font-normal shrink-0">
-                {persianDate}
+                فهرست، کانبان و تقویم یکپارچه
+              </span>
+            </div>
+          )}
+
+          {activeView === 'notes' && (
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight shrink-0">
+                یادداشت‌ها
+              </h1>
+              <span className="text-xs text-gray-500 hidden sm:inline" aria-hidden="true">
+                ·
+              </span>
+              <span className="text-xs text-gray-400 font-normal shrink-0">
+                یادداشت‌ها و ایده‌های سریع
               </span>
             </div>
           )}

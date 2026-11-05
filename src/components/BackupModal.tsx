@@ -57,7 +57,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     try {
       const exportData = {
         appName: 'KarRooz',
-        version: 3,
+        version: 4,
         exportedAt: new Date().toISOString(),
         note: 'این فایل متنی حاوی اطلاعات شخصی شما به صورت رمزنگاری‌نشده (Unencrypted) است.',
         projects,
@@ -103,7 +103,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     }
 
     const version = Number(parsed.version);
-    if (version !== 1 && version !== 2 && version !== 3) {
+    if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
       throw new Error(`نگارش فایل پشتیبان (${version}) پشتیبانی نمی‌شود.`);
     }
 
@@ -162,6 +162,36 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         legacyCount++;
       }
 
+      // Preserve recurrence and occurrenceOverrides if valid
+      let recurrence = undefined;
+      if (itemType === 'task' && item.recurrence && typeof item.recurrence === 'object') {
+        const r = item.recurrence;
+        if (
+          (r.frequency === 'daily' || r.frequency === 'weekly' || r.frequency === 'monthly') &&
+          typeof r.interval === 'number' &&
+          r.startDate
+        ) {
+          recurrence = {
+            frequency: r.frequency,
+            interval: Math.max(1, Number(r.interval) || 1),
+            startDate: String(r.startDate),
+            endType: r.endType === 'until' ? 'until' : 'never',
+            endDate: r.endDate ? String(r.endDate) : undefined,
+            weeklyDays: Array.isArray(r.weeklyDays) ? r.weeklyDays.map(Number) : undefined,
+            monthlyBasis: r.monthlyBasis === 'gregorian' ? 'gregorian' : 'jalali',
+            monthlyDay: typeof r.monthlyDay === 'number' ? Number(r.monthlyDay) : undefined,
+            monthlyPolicy: r.monthlyPolicy === 'skip' ? 'skip' : 'last_day',
+            deadlineOffsetDays: typeof r.deadlineOffsetDays === 'number' ? Number(r.deadlineOffsetDays) : undefined,
+            stoppedAt: r.stoppedAt ? String(r.stoppedAt) : undefined,
+          };
+        }
+      }
+
+      let occurrenceOverrides = undefined;
+      if (itemType === 'task' && item.occurrenceOverrides && typeof item.occurrenceOverrides === 'object') {
+        occurrenceOverrides = { ...item.occurrenceOverrides };
+      }
+
       return {
         id: String(item.id || `item-${Date.now()}-${idx}`),
         type: itemType,
@@ -179,6 +209,8 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         dueDate,
         inToday: Boolean(item.inToday),
         destination: item.destination === 'today' ? 'today' : undefined,
+        recurrence,
+        occurrenceOverrides,
       };
     });
 
@@ -417,9 +449,9 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               {/* Action 1: Export */}
               <div className="p-3.5 rounded-xl bg-[#14151C] border border-[#252734] flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-semibold text-gray-200">خروجی اطلاعات (Backup v3)</h4>
+                  <h4 className="text-xs font-semibold text-gray-200">خروجی اطلاعات (Backup v4)</h4>
                   <p className="text-[11px] text-gray-400 mt-0.5">
-                    دانلود کل پروژه‌ها، تسک‌ها، روزهای انجام و مهلت‌ها به صورت JSON
+                    دانلود کل پروژه‌ها، تسک‌ها، کارهای تکرارشونده، روزهای انجام و مهلت‌ها به صورت JSON
                   </p>
                 </div>
                 <button
@@ -437,7 +469,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                 <div>
                   <h4 className="text-xs font-semibold text-gray-200">بازیابی اطلاعات (Restore)</h4>
                   <p className="text-[11px] text-gray-400 mt-0.5">
-                    بارگذاری فایل پشتیبان نسخه کار روز (نگارش ۱، ۲ یا ۳) و جایگزینی روی این دستگاه
+                    بارگذاری فایل پشتیبان نسخه کار روز (نگارش ۱، ۲، ۳ یا ۴) و جایگزینی روی این دستگاه
                   </p>
                 </div>
                 <div>

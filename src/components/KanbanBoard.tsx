@@ -1,23 +1,27 @@
 import React, { useState } from 'react';
-import { Item, KanbanStatus, KANBAN_COLUMNS } from '../types';
+import { Item, Project, KanbanStatus, KANBAN_COLUMNS } from '../types';
 import { StatusMenu } from './StatusMenu';
-import { Check } from 'lucide-react';
+import { Check, Repeat } from 'lucide-react';
 import { toPersianDigits } from '../utils/date';
 
 interface KanbanBoardProps {
   tasks: Item[];
+  projects?: Project[];
   isSimpleMode: boolean;
   onStatusChange: (taskId: string, newStatus: KanbanStatus) => void;
   onToggleComplete: (taskId: string, e: React.MouseEvent) => void;
   onSelectTask: (task: Item) => void;
+  showProjectBadge?: boolean;
 }
 
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   tasks,
+  projects = [],
   isSimpleMode,
   onStatusChange,
   onToggleComplete,
   onSelectTask,
+  showProjectBadge = false,
 }) => {
   // Mobile tab state for narrow viewports
   const [activeMobileColumn, setActiveMobileColumn] = useState<KanbanStatus>('todo');
@@ -99,9 +103,29 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               </p>
             )}
 
-            {/* Tags and Today badge */}
+            {/* Tags, Project, and Today badge */}
             {!isSimpleMode && (
               <div className="flex items-center gap-1.5 flex-wrap mt-2 text-[10px] text-gray-500">
+                {showProjectBadge && (task.projectId || task.project) && (() => {
+                  const proj = projects.find((p) => p.id === task.projectId);
+                  const name = proj?.name || task.project;
+                  const color = proj?.color || '#818CF8';
+                  return (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-[#111218] border border-[#232532] text-gray-300">
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
+                      <span className="truncate max-w-[100px]">{name}</span>
+                    </span>
+                  );
+                })()}
+                {(task.isRecurringOccurrence || task.recurrence) && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] text-violet-300 bg-violet-950/40 border border-violet-800/40 px-1.5 py-0.2 rounded font-medium"
+                    title="تسک تکرارشونده"
+                  >
+                    <Repeat className="w-2.5 h-2.5 text-violet-400" />
+                    <span>تکرار</span>
+                  </span>
+                )}
                 {task.inToday && (
                   <span className="text-violet-300 bg-violet-950/40 border border-violet-800/40 px-1.5 py-0.2 rounded font-medium">
                     در امروز

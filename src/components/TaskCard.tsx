@@ -1,6 +1,6 @@
 import React from 'react';
 import { Item, Project } from '../types';
-import { Check, FileText, Calendar, Clock, AlertTriangle } from 'lucide-react';
+import { Check, FileText, Calendar, Clock, AlertTriangle, Repeat } from 'lucide-react';
 import {
   formatTimeAgo,
   formatJalaliDate,
@@ -17,6 +17,8 @@ interface TaskCardProps {
   onClick: (item: Item) => void;
   onMoveToToday?: (item: Item, e: React.MouseEvent) => void;
   showMoveToTodayAction?: boolean;
+  onOpenSeriesModal?: (seriesId: string) => void;
+  onSkipOccurrence?: (item: Item, e: React.MouseEvent) => void;
 }
 
 export const TaskCard: React.FC<TaskCardProps> = ({
@@ -27,6 +29,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   onClick,
   onMoveToToday,
   showMoveToTodayAction = false,
+  onOpenSeriesModal,
+  onSkipOccurrence,
 }) => {
   const isTask = item.type === 'task';
 
@@ -176,6 +180,39 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             </span>
           )}
 
+          {/* Recurrence Badge */}
+          {(item.isRecurringOccurrence || item.recurrence) && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onOpenSeriesModal) {
+                  onOpenSeriesModal(item.recurringSeriesId || item.id);
+                }
+              }}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-medium text-[10px] bg-violet-950/40 text-violet-300 border border-violet-800/40 hover:bg-violet-900/50 hover:text-white transition-colors cursor-pointer"
+              title="تسک تکرارشونده - کلیک برای مشاهده مجموعه"
+            >
+              <Repeat className="w-3 h-3 text-violet-400 shrink-0" />
+              <span>تکرار</span>
+            </button>
+          )}
+
+          {/* Quick "صرف‌نظر" action for recurring occurrences */}
+          {item.isRecurringOccurrence && !isCompleted && onSkipOccurrence && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSkipOccurrence(item, e);
+              }}
+              className="mr-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-gray-400 hover:text-amber-300 bg-transparent hover:bg-amber-950/20 border border-gray-700/40 hover:border-amber-700/50 transition-colors cursor-pointer"
+              title="صرف‌نظر از این نوبت تکرار"
+            >
+              <span>صرف‌نظر از این نوبت</span>
+            </button>
+          )}
+
           {/* Quick "انتقال به امروز" action for past planned items */}
           {showMoveToTodayAction && onMoveToToday && !isCompleted && (
             <button
@@ -184,7 +221,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 e.stopPropagation();
                 onMoveToToday(item, e);
               }}
-              className="mr-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-violet-900/40 hover:bg-violet-800/60 text-violet-200 border border-violet-700/50 transition-colors cursor-pointer"
+              className={`${item.isRecurringOccurrence ? '' : 'mr-auto'} inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-violet-900/40 hover:bg-violet-800/60 text-violet-200 border border-violet-700/50 transition-colors cursor-pointer`}
               title="تغییر روز انجام به امروز"
             >
               <span>انتقال به امروز</span>

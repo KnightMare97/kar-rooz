@@ -4,11 +4,9 @@ import {
   Sun,
   FileText,
   Folder,
-  Calendar,
+  Layers,
   CloudOff,
   HardDrive,
-  Eye,
-  EyeOff,
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/date';
 
@@ -20,6 +18,7 @@ interface SidebarProps {
   onToggleSimpleMode: () => void;
   onOpenBackupModal: () => void;
   activeCount: number;
+  allWorkCount?: number;
   notesCount: number;
   projectsCount: number;
 }
@@ -32,11 +31,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleSimpleMode,
   onOpenBackupModal,
   activeCount,
+  allWorkCount = 0,
   notesCount,
   projectsCount,
 }) => {
-  const isTodayActive = activeView === 'today' && (filter === 'all' || filter === 'tasks');
-  const isNotesActive = activeView === 'today' && filter === 'notes';
+  const isTodayActive = activeView === 'today';
+  const isAllWorkActive = activeView === 'all-work';
+  const isNotesActive = activeView === 'notes';
   const isProjectsActive = activeView === 'projects' || activeView === 'project-detail';
 
   return (
@@ -55,18 +56,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
           <span className="text-[10px] text-violet-400/90 bg-violet-950/40 border border-violet-800/40 px-2 py-0.5 rounded-full font-mono">
-            نسخه ۲
+            نسخه ۳
           </span>
         </div>
 
-        {/* Primary Navigation */}
+        {/* Primary Navigation: 1. امروز 2. همه کارها 3. پروژه‌ها 4. یادداشت‌ها */}
         <div className="space-y-1">
           <div className="text-[11px] font-semibold text-gray-400 px-2 mb-2">فضای کاری</div>
 
-          {/* Today */}
+          {/* 1. Today */}
           <button
             type="button"
-            onClick={() => onNavigate('today', 'all')}
+            onClick={() => onNavigate('today')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
               isTodayActive
                 ? 'bg-[#252238] text-violet-200 border border-violet-500/30'
@@ -82,23 +83,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </button>
 
-          {/* Calendar (Now enabled!) */}
+          {/* 2. All Work (Unified Views: List, Kanban, Calendar) */}
           <button
             type="button"
-            onClick={() => onNavigate('calendar')}
+            onClick={() => onNavigate('all-work')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-              activeView === 'calendar'
+              isAllWorkActive
                 ? 'bg-[#252238] text-violet-200 border border-violet-500/30'
                 : 'text-gray-300 hover:bg-[#1E202B] hover:text-white'
             }`}
           >
             <div className="flex items-center gap-2.5">
-              <Calendar className="w-4 h-4 text-violet-400" />
-              <span>تقویم و برنامه‌ریزی</span>
+              <Layers className="w-4 h-4 text-violet-400" />
+              <span>همه کارها</span>
             </div>
+            {allWorkCount > 0 && (
+              <span className="text-[11px] font-mono text-gray-400 bg-[#16171E] px-1.5 py-0.5 rounded-md">
+                {toPersianDigits(allWorkCount)}
+              </span>
+            )}
           </button>
 
-          {/* Projects (Enabled!) */}
+          {/* 3. Projects */}
           <button
             type="button"
             onClick={() => onNavigate('projects')}
@@ -110,17 +116,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <div className="flex items-center gap-2.5">
               <Folder className="w-4 h-4 text-violet-400" />
-              <span>پروژه‌ها و کانبان</span>
+              <span>پروژه‌ها</span>
             </div>
             <span className="text-[11px] font-mono text-gray-400 bg-[#16171E] px-1.5 py-0.5 rounded-md">
               {toPersianDigits(projectsCount)}
             </span>
           </button>
 
-          {/* Notes */}
+          {/* 4. Notes */}
           <button
             type="button"
-            onClick={() => onNavigate('today', 'notes')}
+            onClick={() => onNavigate('notes')}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
               isNotesActive
                 ? 'bg-[#252238] text-violet-200 border border-violet-500/30'
@@ -161,34 +167,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Bottom Area: Compact Simple Mode Toggle & Secondary Storage Notice */}
-      <div className="p-4 space-y-2.5 border-t border-[#222431] bg-[#121318]/50">
-        {/* Compact Simple Mode Toggle */}
-        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#181922] border border-[#262835]">
-          <div className="flex items-center gap-2">
-            {isSimpleMode ? (
-              <EyeOff className="w-3.5 h-3.5 text-violet-400" />
-            ) : (
-              <Eye className="w-3.5 h-3.5 text-gray-400" />
-            )}
-            <span className="text-xs font-medium text-gray-200">حالت ساده</span>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isSimpleMode}
-            onClick={onToggleSimpleMode}
-            className={`px-2.5 py-0.5 text-[11px] font-medium rounded-md border transition-colors cursor-pointer ${
-              isSimpleMode
-                ? 'bg-violet-950/40 text-violet-200 border-violet-600/40'
-                : 'bg-[#121318] text-gray-400 border-[#242634] hover:text-gray-200'
-            }`}
-          >
-            {isSimpleMode ? 'روشن' : 'خاموش'}
-          </button>
-        </div>
-
-        {/* Visually Secondary Local Storage Status & Compact Backup Trigger */}
+      {/* Bottom Area: Secondary Storage Notice & Backup Trigger */}
+      <div className="p-4 space-y-2 border-t border-[#222431] bg-[#121318]/50">
         <div className="pt-0.5 space-y-1.5">
           <div className="flex items-center gap-1.5 text-[11px] text-gray-500 px-1">
             <HardDrive className="w-3 h-3 text-gray-500 shrink-0" />

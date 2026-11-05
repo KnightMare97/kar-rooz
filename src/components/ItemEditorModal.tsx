@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Item, ItemType, Project, KanbanStatus, KANBAN_COLUMNS } from '../types';
+import { Item, ItemType, Project, KanbanStatus, KANBAN_COLUMNS, RecurrenceRule } from '../types';
 import {
   X,
   Trash2,
@@ -12,9 +12,11 @@ import {
   AlertTriangle,
   Calendar,
   Clock,
+  Repeat,
 } from 'lucide-react';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { DatePickerModal } from './DatePickerModal';
+import { RecurrenceSection } from './RecurrenceSection';
 import {
   getTehranTodayDateString,
   getTomorrowDateString,
@@ -29,6 +31,7 @@ interface ItemEditorModalProps {
   onClose: () => void;
   onSave: (updatedItem: Item) => void;
   onDelete: (itemId: string) => void;
+  onOpenSeriesModal?: (seriesId: string) => void;
 }
 
 export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
@@ -38,6 +41,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
   onClose,
   onSave,
   onDelete,
+  onOpenSeriesModal,
 }) => {
   const todayStr = getTehranTodayDateString();
   const tomorrowStr = getTomorrowDateString(todayStr);
@@ -50,6 +54,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
   const [plannedDate, setPlannedDate] = useState<string | undefined>(undefined);
   const [dueDate, setDueDate] = useState<string | undefined>(undefined);
   const [tagsInput, setTagsInput] = useState('');
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | undefined>(undefined);
   const [error, setError] = useState('');
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
@@ -66,6 +71,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
       setPlannedDate(item.plannedDate);
       setDueDate(item.dueDate);
       setTagsInput(item.tags?.join('، ') || '');
+      setRecurrence(item.recurrence);
       setError('');
       setIsDeleteConfirmOpen(false);
       setDatePickerTarget(null);
@@ -135,6 +141,8 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
       dueDate: type === 'task' ? dueDate || undefined : undefined,
       inToday: plannedDate === todayStr,
       destination: plannedDate === todayStr ? 'today' : undefined,
+      // Recurrence rule (tasks only, notes do not recur)
+      recurrence: type === 'task' && !item.isRecurringOccurrence ? recurrence : item.recurrence,
       // Completion and status (status untouched when changing dates!)
       completed: type === 'note' ? false : isDone,
       status: type === 'task' ? status : undefined,
@@ -396,6 +404,39 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                 />
               </div>
             </div>
+
+            {/* Recurrence Zone: Occurrence Notice vs Series Recurrence Section */}
+            {item.isRecurringOccurrence ? (
+              <div className="p-3.5 rounded-xl bg-violet-950/25 border border-violet-800/40 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-violet-300 font-semibold text-xs">
+                    <Repeat className="w-4 h-4 text-violet-400" />
+                    <span>نوبت تکرارشونده</span>
+                  </div>
+                  {onOpenSeriesModal && item.recurringSeriesId && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenSeriesModal(item.recurringSeriesId!)}
+                      className="text-[11px] text-violet-300 hover:text-white underline underline-offset-2 cursor-pointer"
+                    >
+                      مشاهده مجموعه تکرار...
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-300 leading-relaxed">
+                  این مورد یک نوبت مستقل از مجموعه تکرار است. هر تغییری در عنوان، مهلت یا جابجایی روز انجام فقط بر روی همین نوبت اعمال خواهد شد و نوبت‌های دیگر دست‌نخورده می‌مانند.
+                </p>
+              </div>
+            ) : type === 'task' ? (
+              <RecurrenceSection
+                rule={recurrence}
+                onChange={setRecurrence}
+                plannedDate={plannedDate}
+                dueDate={dueDate}
+                onSetPlannedDate={(d) => setPlannedDate(d)}
+                isOccurrence={false}
+              />
+            ) : null}
 
             {/* Workflow Status (Only for Tasks) */}
             {type === 'task' && (
