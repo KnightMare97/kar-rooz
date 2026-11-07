@@ -1,0 +1,170 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile document stored under /users/{userId}",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Unique Firebase Authentication UID",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the authenticated user",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the user",
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar URL",
+          "maxLength": 512
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp in ISO format"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update timestamp in ISO format"
+        }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "User project for organizing tasks and work",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable unique ID of the project",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the owner",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Project title/name",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional project description",
+          "maxLength": 500
+        },
+        "color": {
+          "type": "string",
+          "description": "Hex color code",
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Whether the project is archived"
+        },
+        "archivedAt": {
+          "type": "string",
+          "description": "Timestamp when archived"
+        }
+      },
+      "required": ["id", "userId", "name", "color", "createdAt", "archived"]
+    },
+    "Item": {
+      "title": "Item",
+      "description": "Task or Note item owned by the user",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable unique ID of the item",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the owner",
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "description": "Item type: task or note",
+          "enum": ["task", "note"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the task or note",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description or markdown content",
+          "maxLength": 2000
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "Completion state for tasks"
+        },
+        "status": {
+          "type": "string",
+          "description": "Kanban status",
+          "enum": ["todo", "in_progress", "done"]
+        },
+        "projectId": {
+          "type": "string",
+          "description": "Associated project ID or unassigned",
+          "maxLength": 128
+        },
+        "tags": {
+          "type": "array",
+          "description": "List of tags"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        },
+        "completedAt": {
+          "type": "string",
+          "description": "Timestamp when completed"
+        },
+        "plannedDate": {
+          "type": "string",
+          "description": "Target planned date YYYY-MM-DD",
+          "maxLength": 10
+        },
+        "dueDate": {
+          "type": "string",
+          "description": "Deadline date YYYY-MM-DD",
+          "maxLength": 10
+        }
+      },
+      "required": ["id", "userId", "type", "title", "completed", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Authenticated user profile documents"
+    },
+    "/users/{userId}/projects/{projectId}": {
+      "schema": "Project",
+      "description": "User projects scoped strictly to the owner"
+    },
+    "/users/{userId}/items/{itemId}": {
+      "schema": "Item",
+      "description": "User tasks and notes scoped strictly to the owner"
+    }
+  }
+}

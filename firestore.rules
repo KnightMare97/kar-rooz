@@ -1,0 +1,137 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common security primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation helper for User profile
+    function isValidUser(data, userId) {
+      return data.uid == userId
+        && data.uid == request.auth.uid
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && (!('email' in data) || (data.email is string && data.email.size() <= 256))
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120))
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 512))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    // Validation helper for Project
+    function isValidProject(data, userId) {
+      return data.id is string && isValidId(data.id)
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.color is string && data.color.size() <= 16
+        && data.archived is bool
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && (!('description' in data) || (data.description is string && data.description.size() <= 500))
+        && (!('archivedAt' in data) || (data.archivedAt is string && data.archivedAt.size() <= 64));
+    }
+
+    // Validation helper for Item (Task or Note)
+    function isValidItem(data, userId) {
+      return data.id is string && isValidId(data.id)
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.type is string && data.type in ['task', 'note']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.completed is bool
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && (!('status' in data) || (data.status is string && data.status in ['todo', 'in_progress', 'done']))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 2000))
+        && (!('projectId' in data) || (data.projectId is string && data.projectId.size() <= 128))
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 50))
+        && (!('plannedDate' in data) || (data.plannedDate is string && data.plannedDate.size() <= 10))
+        && (!('dueDate' in data) || (data.dueDate is string && data.dueDate.size() <= 10))
+        && (!('completedAt' in data) || (data.completedAt is string && data.completedAt.size() <= 64))
+        && (!('recurrence' in data) || data.recurrence is map)
+        && (!('occurrenceOverrides' in data) || data.occurrenceOverrides is map);
+    }
+
+    // User collection and subcollections
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && isValidUser(incoming(), userId)
+        && incoming().keys().hasAll(['uid', 'createdAt'])
+        && incoming().keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'createdAt', 'updatedAt']);
+      allow update: if isOwner(userId)
+        && isValidUser(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if false; // Deleting user account not supported in this client scope
+
+      // User Projects subcollection
+      match /projects/{projectId} {
+        allow get: if isOwner(userId) && isValidId(projectId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidId(projectId)
+          && incoming().id == projectId
+          && isValidProject(incoming(), userId)
+          && incoming().keys().hasAll(['id', 'userId', 'name', 'color', 'createdAt', 'archived'])
+          && incoming().keys().hasOnly(['id', 'userId', 'name', 'description', 'color', 'createdAt', 'archived', 'archivedAt']);
+        allow update: if isOwner(userId)
+          && isValidId(projectId)
+          && isValidProject(incoming(), userId)
+          && incoming().id == existing().id
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(projectId);
+      }
+
+      // User Items (Tasks & Notes) subcollection
+      match /items/{itemId} {
+        allow get: if isOwner(userId) && isValidId(itemId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidId(itemId)
+          && incoming().id == itemId
+          && isValidItem(incoming(), userId)
+          && incoming().keys().hasAll(['id', 'userId', 'type', 'title', 'completed', 'createdAt'])
+          && incoming().keys().hasOnly([
+            'id', 'userId', 'type', 'title', 'description', 'completed', 'status',
+            'projectId', 'tags', 'createdAt', 'completedAt', 'plannedDate', 'dueDate',
+            'recurrence', 'occurrenceOverrides'
+          ]);
+        allow update: if isOwner(userId)
+          && isValidId(itemId)
+          && isValidItem(incoming(), userId)
+          && incoming().id == existing().id
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt;
+        allow delete: if isOwner(userId) && isValidId(itemId);
+      }
+    }
+
+    // Health / Connection verification doc (restricted to signed in users)
+    match /test/{docId} {
+      allow get: if isSignedIn() && isValidId(docId);
+    }
+  }
+}

@@ -5,10 +5,13 @@ import {
   FileText,
   Folder,
   Layers,
-  CloudOff,
+  Cloud,
   HardDrive,
+  Database,
+  CheckCircle2,
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/date';
+import { useAuth } from '../contexts/AuthContext';
 
 interface SidebarProps {
   activeView: ActiveView;
@@ -17,6 +20,7 @@ interface SidebarProps {
   isSimpleMode: boolean;
   onToggleSimpleMode: () => void;
   onOpenBackupModal: () => void;
+  onOpenAuthModal?: () => void;
   activeCount: number;
   allWorkCount?: number;
   notesCount: number;
@@ -30,11 +34,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isSimpleMode,
   onToggleSimpleMode,
   onOpenBackupModal,
+  onOpenAuthModal,
   activeCount,
   allWorkCount = 0,
   notesCount,
   projectsCount,
 }) => {
+  const { user } = useAuth();
   const isTodayActive = activeView === 'today';
   const isAllWorkActive = activeView === 'all-work';
   const isNotesActive = activeView === 'notes';
@@ -143,26 +149,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Future Scope Navigation - Hidden in Simple Mode to eliminate nonessential distraction */}
+        {/* Cloud & Firebase Integration Section */}
         {!isSimpleMode && (
           <div className="space-y-1 pt-2 border-t border-[#222431]">
             <div className="flex items-center justify-between px-2 mb-2">
-              <span className="text-[11px] font-semibold text-gray-400">بخش‌های آینده</span>
-              <span className="text-[10px] text-gray-500">غیرفعال در این نسخه</span>
+              <span className="text-[11px] font-semibold text-gray-400">بک‌اند و فضای ابری</span>
+              <span className="text-[10px] text-emerald-400 font-mono">Firebase</span>
             </div>
 
-            <div
-              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs text-gray-400 bg-transparent border border-transparent cursor-not-allowed select-none opacity-50"
-              title="همگام‌سازی ابری در فاز بعدی خواهد آمد"
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer border ${
+                user
+                  ? 'bg-emerald-950/25 border-emerald-800/40 text-emerald-200 hover:bg-emerald-950/40'
+                  : 'bg-[#181922] border-[#262835] text-gray-300 hover:text-white hover:bg-[#1E202B]'
+              }`}
+              title="مشاهده وضعیت حساب کاربری، تست ارتباط با فایربیس و قوانین امنیتی"
             >
               <div className="flex items-center gap-2.5">
-                <CloudOff className="w-4 h-4 text-gray-400" />
-                <span>همگام‌سازی ابری</span>
+                <Database className={`w-4 h-4 ${user ? 'text-emerald-400' : 'text-violet-400'}`} />
+                <span className="truncate max-w-[110px]">
+                  {user ? (user.displayName || 'حساب کاربری') : 'ورود / فایربیس'}
+                </span>
               </div>
-              <span className="text-[10px] text-gray-400 border border-gray-700/60 px-1.5 py-0.2 rounded">
-                آینده
+              <span
+                className={`text-[10px] font-medium px-1.5 py-0.2 rounded ${
+                  user
+                    ? 'text-emerald-300 bg-emerald-950/50 border border-emerald-800/50'
+                    : 'text-violet-300 bg-violet-950/50 border border-violet-800/50'
+                }`}
+              >
+                {user ? 'متصل' : 'ورود'}
               </span>
-            </div>
+            </button>
           </div>
         )}
       </div>

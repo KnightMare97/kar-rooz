@@ -45,6 +45,8 @@ import { ProjectList } from './components/ProjectList';
 import { ProjectDetail } from './components/ProjectDetail';
 import { ProjectModal } from './components/ProjectModal';
 import { BackupModal } from './components/BackupModal';
+import { AuthModal } from './components/AuthModal';
+import { AuthProvider } from './contexts/AuthContext';
 import { Info, X, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -82,6 +84,7 @@ export default function App() {
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [selectedSeriesModalId, setSelectedSeriesModalId] = useState<string | null>(null);
   const [skipConfirmOccurrence, setSkipConfirmOccurrence] = useState<Item | null>(null);
   const [undoSkipInfo, setUndoSkipInfo] = useState<{ seriesId: string; originalDate: string; title: string } | null>(null);
@@ -624,33 +627,36 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#111216] text-[#E2E4E9] flex antialiased selection:bg-violet-500/25 selection:text-white pb-20 md:pb-0">
-      {/* Desktop Sidebar (RTL Right side) */}
-      <Sidebar
-        activeView={activeView}
-        filter={filter}
-        onNavigate={handleNavigate}
-        isSimpleMode={isSimpleMode}
-        onToggleSimpleMode={handleToggleSimpleMode}
-        onOpenBackupModal={() => setIsBackupModalOpen(true)}
-        activeCount={todayActiveCount}
-        allWorkCount={items.length}
-        notesCount={totalNotesCount}
-        projectsCount={activeProjectsCount}
-      />
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Sticky Header with Contextual Title / Breadcrumbs and Simple Mode Toggle */}
-        <Header
+    <AuthProvider>
+      <div className="min-h-screen bg-[#111216] text-[#E2E4E9] flex antialiased selection:bg-violet-500/25 selection:text-white pb-20 md:pb-0">
+        {/* Desktop Sidebar (RTL Right side) */}
+        <Sidebar
           activeView={activeView}
-          activeProject={selectedProject}
-          onNavigateToProjects={() => handleNavigate('projects')}
-          todayActiveCount={todayActiveCount}
-          activeProjectsCount={activeProjectsCount}
+          filter={filter}
+          onNavigate={handleNavigate}
           isSimpleMode={isSimpleMode}
           onToggleSimpleMode={handleToggleSimpleMode}
+          onOpenBackupModal={() => setIsBackupModalOpen(true)}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          activeCount={todayActiveCount}
+          allWorkCount={items.length}
+          notesCount={totalNotesCount}
+          projectsCount={activeProjectsCount}
         />
+
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Sticky Header with Contextual Title / Breadcrumbs and Simple Mode Toggle */}
+          <Header
+            activeView={activeView}
+            activeProject={selectedProject}
+            onNavigateToProjects={() => handleNavigate('projects')}
+            todayActiveCount={todayActiveCount}
+            activeProjectsCount={activeProjectsCount}
+            isSimpleMode={isSimpleMode}
+            onToggleSimpleMode={handleToggleSimpleMode}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          />
 
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
           {/* VIEW 1: TODAY VIEW */}
@@ -760,14 +766,22 @@ export default function App() {
 
           {/* Mobile Local Storage Indicator & Backup Trigger */}
           <div className="md:hidden pt-3 pb-1 text-center text-[11px] text-gray-500 flex items-center justify-center gap-2">
-            <span>ذخیره محلی روی همین دستگاه</span>
+            <span>ذخیره محلی</span>
             <span>·</span>
             <button
               type="button"
               onClick={() => setIsBackupModalOpen(true)}
               className="text-violet-400 hover:text-violet-300 underline underline-offset-2 cursor-pointer"
             >
-              خروجی و بازیابی داده‌ها
+              خروجی JSON
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => setIsAuthModalOpen(true)}
+              className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2 cursor-pointer"
+            >
+              اتصال فایربیس
             </button>
           </div>
         </main>
@@ -901,6 +915,12 @@ export default function App() {
         isItemEditorOpen={Boolean(editingItem)}
       />
 
+      {/* Firebase Authentication & Cloud Architecture Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
+
       {/* Mobile Bottom Navigation */}
       <MobileNav
         activeView={activeView}
@@ -913,5 +933,6 @@ export default function App() {
         projectsCount={activeProjectsCount}
       />
     </div>
+  </AuthProvider>
   );
 }

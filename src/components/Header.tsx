@@ -1,7 +1,8 @@
 import React from 'react';
 import { ActiveView, Project } from '../types';
-import { Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight, User as UserIcon, Database } from 'lucide-react';
 import { getTodayPersianDateString, toPersianDigits } from '../utils/date';
+import { useAuth } from '../contexts/AuthContext';
 
 interface HeaderProps {
   activeView: ActiveView;
@@ -11,6 +12,7 @@ interface HeaderProps {
   activeProjectsCount: number;
   isSimpleMode: boolean;
   onToggleSimpleMode: () => void;
+  onOpenAuthModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,8 +23,10 @@ export const Header: React.FC<HeaderProps> = ({
   activeProjectsCount,
   isSimpleMode,
   onToggleSimpleMode,
+  onOpenAuthModal,
 }) => {
   const persianDate = getTodayPersianDateString();
+  const { user } = useAuth();
 
   return (
     <header className="border-b border-[#222430] bg-[#14151C]/90 backdrop-blur-md sticky top-0 z-20 px-4 sm:px-6 py-3">
@@ -118,20 +122,58 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Compact Simple Mode Toggle */}
-        <button
-          type="button"
-          onClick={onToggleSimpleMode}
-          title={isSimpleMode ? 'خروج از حالت ساده (نمایش متادیتا)' : 'فعال‌سازی حالت ساده (تمرکز حداکثری)'}
-          className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors cursor-pointer shrink-0 ${
-            isSimpleMode
-              ? 'bg-violet-950/40 text-violet-200 border-violet-600/40 shadow-xs'
-              : 'bg-[#181920] text-gray-400 border-[#262834] hover:text-gray-200 hover:bg-[#1E202A]'
-          }`}
-        >
-          {isSimpleMode ? <EyeOff className="w-3.5 h-3.5 text-violet-400" /> : <Eye className="w-3.5 h-3.5 text-gray-400" />}
-          <span>حالت ساده: {isSimpleMode ? 'روشن' : 'خاموش'}</span>
-        </button>
+        {/* Action Controls: Firebase Account & Simple Mode Toggle */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Firebase / Account Status Button */}
+          {onOpenAuthModal && (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              title={user ? `متصل به فایربیس: ${user.email || user.displayName}` : 'اتصال به فایربیس و ورود با گوگل'}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors cursor-pointer shrink-0 ${
+                user
+                  ? 'bg-emerald-950/30 text-emerald-300 border-emerald-800/40 hover:bg-emerald-900/40'
+                  : 'bg-[#181920] text-gray-300 border-[#262834] hover:text-white hover:bg-[#1E202A]'
+              }`}
+            >
+              {user ? (
+                <>
+                  {user.photoURL ? (
+                    <img
+                      src={user.photoURL}
+                      alt={user.displayName || 'کاربر'}
+                      className="w-3.5 h-3.5 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  )}
+                  <span className="truncate max-w-[90px] hidden sm:inline">{user.displayName || 'حساب کاربری'}</span>
+                  <span className="text-[10px] text-emerald-400 font-mono sm:hidden">ابری</span>
+                </>
+              ) : (
+                <>
+                  <Database className="w-3.5 h-3.5 text-violet-400" />
+                  <span>فایربیس</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Compact Simple Mode Toggle */}
+          <button
+            type="button"
+            onClick={onToggleSimpleMode}
+            title={isSimpleMode ? 'خروج از حالت ساده (نمایش متادیتا)' : 'فعال‌سازی حالت ساده (تمرکز حداکثری)'}
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors cursor-pointer shrink-0 ${
+              isSimpleMode
+                ? 'bg-violet-950/40 text-violet-200 border-violet-600/40 shadow-xs'
+                : 'bg-[#181920] text-gray-400 border-[#262834] hover:text-gray-200 hover:bg-[#1E202A]'
+            }`}
+          >
+            {isSimpleMode ? <EyeOff className="w-3.5 h-3.5 text-violet-400" /> : <Eye className="w-3.5 h-3.5 text-gray-400" />}
+            <span className="hidden sm:inline">حالت ساده: {isSimpleMode ? 'روشن' : 'خاموش'}</span>
+          </button>
+        </div>
       </div>
     </header>
   );
