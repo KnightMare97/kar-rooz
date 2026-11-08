@@ -10,6 +10,8 @@ import {
   ConnectionTestResult,
 } from '../services/firebase';
 
+import { SyncStatus } from '../types';
+
 interface AuthContextType {
   user: FirebaseUser | null;
   loading: boolean;
@@ -21,6 +23,12 @@ interface AuthContextType {
   isTestingConnection: boolean;
   verifyConnection: () => Promise<ConnectionTestResult>;
   metadata: typeof firebaseMetadata;
+  syncStatus: SyncStatus;
+  setSyncStatus: (s: SyncStatus) => void;
+  hasPendingWrites: boolean;
+  setHasPendingWrites: (p: boolean) => void;
+  syncError: string | null;
+  setSyncError: (e: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,6 +39,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authError, setAuthError] = useState<string | null>(null);
   const [connectionResult, setConnectionResult] = useState<ConnectionTestResult | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
+  const [hasPendingWrites, setHasPendingWrites] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
@@ -104,8 +115,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isTestingConnection,
       verifyConnection,
       metadata: firebaseMetadata,
+      syncStatus,
+      setSyncStatus,
+      hasPendingWrites,
+      setHasPendingWrites,
+      syncError,
+      setSyncError,
     }),
-    [user, loading, authError, connectionResult, isTestingConnection]
+    [user, loading, authError, connectionResult, isTestingConnection, syncStatus, hasPendingWrites, syncError]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

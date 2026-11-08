@@ -1,7 +1,7 @@
 /**
  * KarRooz (کار روز) - Personal Task, Note & Project Manager
- * Calm, focused, device-local, RTL Persian productivity tool.
- * Iteration: Unified Work Views (All Work & Project scopes: List, Kanban, Calendar).
+ * Calm, focused, RTL Persian productivity tool.
+ * Shared Firestore Persistence with Owner-Only Isolation and Safe Local Migration.
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -29,7 +29,7 @@ import {
   loadAllWorkShowArchived,
   saveAllWorkShowArchived,
 } from './services/storage';
-import { getTehranTodayDateString, formatJalaliDate } from './utils/date';
+import { getTehranTodayDateString, formatJalaliDate, toPersianDigits, addDays } from './utils/date';
 import { expandAllItems } from './utils/recurrence';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -46,10 +46,44 @@ import { ProjectDetail } from './components/ProjectDetail';
 import { ProjectModal } from './components/ProjectModal';
 import { BackupModal } from './components/BackupModal';
 import { AuthModal } from './components/AuthModal';
-import { AuthProvider } from './contexts/AuthContext';
-import { Info, X, AlertCircle } from 'lucide-react';
+import { MigrationModal } from './components/MigrationModal';
+import { SettingsView } from './components/SettingsView';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { SettingsProvider } from './contexts/SettingsContext';
+import {
+  subscribeToUserItems,
+  subscribeToUserProjects,
+  saveFirestoreItem,
+  deleteFirestoreItem,
+  saveFirestoreProject,
+  deleteFirestoreProject,
+  fetchCloudStatus,
+  migrateLocalDataToFirestore,
+  CollisionResolution,
+  MigrationResult,
+} from './services/firestoreRepository';
+import { AlertCircle, Cloud, RefreshCw, X } from 'lucide-react';
 
-export default function App() {
+interface MigrationModalState {
+  isOpen: boolean;
+  localItems: Item[];
+  localProjects: Project[];
+  cloudItemsCount: number;
+  cloudProjectsCount: number;
+  collidingCount: number;
+}
+
+function AppContent() {
+  const {
+    user,
+    syncStatus,
+    setSyncStatus,
+    hasPendingWrites,
+    setHasPendingWrites,
+    syncError,
+    setSyncError,
+  } = useAuth();
+
   const [items, setItems] = useState<Item[]>(() => loadItems());
   const [projects, setProjects] = useState<Project[]>(() => loadProjects());
   const [activeView, setActiveView] = useState<ActiveView>('today');
@@ -75,7 +109,7 @@ export default function App() {
   );
   const [allWorkSearchQuery, setAllWorkSearchQuery] = useState('');
 
-  // Toast notification for items saved outside active filter
+  // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<number | null>(null);
 
@@ -85,6 +119,7 @@ export default function App() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [migrationModalState, setMigrationModalState] = useState<MigrationModalState | null>(null);
   const [selectedSeriesModalId, setSelectedSeriesModalId] = useState<string | null>(null);
   const [skipConfirmOccurrence, setSkipConfirmOccurrence] = useState<Item | null>(null);
   const [undoSkipInfo, setUndoSkipInfo] = useState<{ seriesId: string; originalDate: string; title: string } | null>(null);
@@ -107,14 +142,100 @@ export default function App() {
     };
   }, []);
 
-  // Sync state to local storage
+  // Save guest data strictly to local storage when not authenticated
   useEffect(() => {
-    saveItems(items);
-  }, [items]);
+    if (!user) {
+      saveItems(items);
+    }
+  }, [items, user]);
 
   useEffect(() => {
-    saveProjects(projects);
-  }, [projects]);
+    if (!user) {
+      saveProjects(projects);
+    }
+  }, [projects, user]);
+
+  // Firestore Realtime Subscriptions & User Lifecycle
+  useEffect(() => {
+    if (!user) {
+      // Revert cleanly to device local storage when signed out
+      setItems(loadItems());
+      setProjects(loadProjects());
+      setSyncStatus('local');
+      setHasPendingWrites(false);
+      setSyncError(null);
+      setMigrationModalState(null);
+      return;
+    }
+
+    setSyncStatus('loading');
+    setSyncError(null);
+
+    // 1. Subscribe to User Items
+    const unsubItems = subscribeToUserItems(
+      user.uid,
+      (cloudItems, meta) => {
+        setItems(cloudItems);
+        setHasPendingWrites(meta.hasPendingWrites);
+        setSyncStatus(meta.hasPendingWrites ? 'syncing' : 'synced');
+      },
+      (err) => {
+        console.error('Firestore items error:', err);
+        setSyncStatus('error');
+        setSyncError(err.message || 'خطا در ارتباط با سرور فایربیس');
+      }
+    );
+
+    // 2. Subscribe to User Projects
+    const unsubProjects = subscribeToUserProjects(
+      user.uid,
+      (cloudProjects, meta) => {
+        setProjects(cloudProjects);
+        setHasPendingWrites(meta.hasPendingWrites);
+      },
+      (err) => {
+        console.error('Firestore projects error:', err);
+        setSyncStatus('error');
+        setSyncError(err.message || 'خطا در ارتباط با سرور فایربیس');
+      }
+    );
+
+    // 3. Inspect if guest data migration prompt is needed
+    const checkMigration = async () => {
+      const localGuestItems = loadItems();
+      const localGuestProjects = loadProjects();
+      const alreadyDecided = localStorage.getItem(`karrooz_migration_decided_${user.uid}`);
+
+      // If user previously completed or dismissed migration, or has no local guest data, skip
+      if (alreadyDecided || (localGuestItems.length === 0 && localGuestProjects.length === 0)) {
+        return;
+      }
+
+      try {
+        const cloudStatus = await fetchCloudStatus(user.uid);
+        const collidingItems = localGuestItems.filter((i) => cloudStatus.cloudItemIds.has(i.id)).length;
+        const collidingProjects = localGuestProjects.filter((p) => cloudStatus.cloudProjectIds.has(p.id)).length;
+
+        setMigrationModalState({
+          isOpen: true,
+          localItems: localGuestItems,
+          localProjects: localGuestProjects,
+          cloudItemsCount: cloudStatus.itemsCount,
+          cloudProjectsCount: cloudStatus.projectsCount,
+          collidingCount: collidingItems + collidingProjects,
+        });
+      } catch (err) {
+        console.warn('Could not inspect cloud status for migration:', err);
+      }
+    };
+
+    checkMigration();
+
+    return () => {
+      unsubItems();
+      unsubProjects();
+    };
+  }, [user]);
 
   const handleToggleSimpleMode = () => {
     const next = !isSimpleMode;
@@ -179,7 +300,18 @@ export default function App() {
       status: isTask ? (newItemData.status || (newItemData.completed ? 'done' : 'todo')) : undefined,
       createdAt: new Date().toISOString(),
     };
+
     setItems((prev) => [newItem, ...prev]);
+
+    // Authenticated cloud write
+    if (user) {
+      setSyncStatus('syncing');
+      saveFirestoreItem(user.uid, newItem).catch((err) => {
+        console.error('Error adding item to Firestore:', err);
+        setSyncStatus('error');
+        showToast('خطا در ذخیره وظیفه در سرور ابری.');
+      });
+    }
 
     // Check if new item leaves active All Work filter
     if (activeView === 'all-work' && allWorkProjectFilters !== null) {
@@ -202,7 +334,7 @@ export default function App() {
             const currentOverride = item.occurrenceOverrides?.[origDate];
             const nextCompleted = !(currentOverride?.completed ?? item.completed);
             const nextStatus: KanbanStatus = nextCompleted ? 'done' : 'todo';
-            return {
+            const updatedItem: Item = {
               ...item,
               occurrenceOverrides: {
                 ...(item.occurrenceOverrides || {}),
@@ -214,6 +346,16 @@ export default function App() {
                 },
               },
             };
+
+            if (user) {
+              setSyncStatus('syncing');
+              saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+                console.error('Firestore save error:', err);
+                setSyncStatus('error');
+              });
+            }
+
+            return updatedItem;
           }
           return item;
         })
@@ -226,12 +368,22 @@ export default function App() {
         if (item.id === id && item.type === 'task') {
           const nextCompleted = !item.completed;
           const nextStatus: KanbanStatus = nextCompleted ? 'done' : 'todo';
-          return {
+          const updatedItem: Item = {
             ...item,
             completed: nextCompleted,
             status: nextStatus,
             completedAt: nextCompleted ? new Date().toISOString() : undefined,
           };
+
+          if (user) {
+            setSyncStatus('syncing');
+            saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+              console.error('Firestore save error:', err);
+              setSyncStatus('error');
+            });
+          }
+
+          return updatedItem;
         }
         return item;
       })
@@ -247,7 +399,7 @@ export default function App() {
         prev.map((item) => {
           if (item.id === seriesId) {
             const currentOverride = item.occurrenceOverrides?.[origDate] || {};
-            return {
+            const parentWithOverride: Item = {
               ...item,
               occurrenceOverrides: {
                 ...(item.occurrenceOverrides || {}),
@@ -265,6 +417,16 @@ export default function App() {
                 },
               },
             };
+
+            if (user) {
+              setSyncStatus('syncing');
+              saveFirestoreItem(user.uid, parentWithOverride).catch((err) => {
+                console.error('Firestore save error:', err);
+                setSyncStatus('error');
+              });
+            }
+
+            return parentWithOverride;
           }
           return item;
         })
@@ -275,6 +437,15 @@ export default function App() {
 
     // Normal item or recurring series parent
     setItems((prev) => prev.map((item) => (item.id === updatedItem.id ? updatedItem : item)));
+
+    if (user) {
+      setSyncStatus('syncing');
+      saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+        console.error('Firestore save error:', err);
+        setSyncStatus('error');
+        showToast('خطا در ذخیره تغییرات در سرور ابری.');
+      });
+    }
 
     // Check if item left active All Work filter
     if (activeView === 'all-work' && allWorkProjectFilters !== null) {
@@ -292,7 +463,7 @@ export default function App() {
         prev.map((item) => {
           if (item.id === seriesId) {
             const currentOverride = item.occurrenceOverrides?.[origDate] || {};
-            return {
+            const updatedItem: Item = {
               ...item,
               occurrenceOverrides: {
                 ...(item.occurrenceOverrides || {}),
@@ -302,6 +473,15 @@ export default function App() {
                 },
               },
             };
+
+            if (user) {
+              setSyncStatus('syncing');
+              saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+                console.error('Firestore save error:', err);
+              });
+            }
+
+            return updatedItem;
           }
           return item;
         })
@@ -309,7 +489,17 @@ export default function App() {
       showToast('نوبت نادیده گرفته شد و از لیست حذف گردید.');
       return;
     }
+
     setItems((prev) => prev.filter((item) => item.id !== itemId));
+
+    if (user) {
+      setSyncStatus('syncing');
+      deleteFirestoreItem(user.uid, itemId).catch((err) => {
+        console.error('Firestore delete error:', err);
+        setSyncStatus('error');
+        showToast('خطا در حذف از سرور ابری.');
+      });
+    }
   };
 
   const handleRequestSkipOccurrence = (item: Item, e?: React.MouseEvent) => {
@@ -328,7 +518,7 @@ export default function App() {
         prev.map((item) => {
           if (item.id === seriesId) {
             const currentOverride = item.occurrenceOverrides?.[origDate] || {};
-            return {
+            const updatedItem: Item = {
               ...item,
               occurrenceOverrides: {
                 ...(item.occurrenceOverrides || {}),
@@ -338,6 +528,15 @@ export default function App() {
                 },
               },
             };
+
+            if (user) {
+              setSyncStatus('syncing');
+              saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+                console.error('Firestore save error:', err);
+              });
+            }
+
+            return updatedItem;
           }
           return item;
         })
@@ -362,10 +561,19 @@ export default function App() {
           } else {
             nextOverrides[originalDate] = cur;
           }
-          return {
+          const updatedItem: Item = {
             ...item,
             occurrenceOverrides: nextOverrides,
           };
+
+          if (user) {
+            setSyncStatus('syncing');
+            saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+              console.error('Firestore save error:', err);
+            });
+          }
+
+          return updatedItem;
         }
         return item;
       })
@@ -378,13 +586,22 @@ export default function App() {
     setItems((prev) =>
       prev.map((item) => {
         if (item.id === seriesId && item.recurrence) {
-          return {
+          const updatedItem: Item = {
             ...item,
             recurrence: {
               ...item.recurrence,
               stoppedAt: cutoffDate,
             },
           };
+
+          if (user) {
+            setSyncStatus('syncing');
+            saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+              console.error('Firestore save error:', err);
+            });
+          }
+
+          return updatedItem;
         }
         return item;
       })
@@ -404,10 +621,19 @@ export default function App() {
           } else {
             nextOverrides[originalDate] = cur;
           }
-          return {
+          const updatedItem: Item = {
             ...item,
             occurrenceOverrides: nextOverrides,
           };
+
+          if (user) {
+            setSyncStatus('syncing');
+            saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+              console.error('Firestore save error:', err);
+            });
+          }
+
+          return updatedItem;
         }
         return item;
       })
@@ -415,7 +641,6 @@ export default function App() {
     showToast('نوبت با موفقیت بازگردانی شد.');
   };
 
-  // Explicit action to move a past item to today while preserving all other properties
   const handleMoveToToday = (item: Item, e: React.MouseEvent) => {
     e.stopPropagation();
     const updated: Item = {
@@ -447,6 +672,14 @@ export default function App() {
         color: projectData.color,
       };
       setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+
+      if (user) {
+        setSyncStatus('syncing');
+        saveFirestoreProject(user.uid, updated).catch((err) => {
+          console.error('Firestore project save error:', err);
+          setSyncStatus('error');
+        });
+      }
     } else {
       const newProject: Project = {
         id: generateId('proj'),
@@ -459,6 +692,14 @@ export default function App() {
       setProjects((prev) => [newProject, ...prev]);
       setSelectedProjectId(newProject.id);
       setActiveView('project-detail');
+
+      if (user) {
+        setSyncStatus('syncing');
+        saveFirestoreProject(user.uid, newProject).catch((err) => {
+          console.error('Firestore project save error:', err);
+          setSyncStatus('error');
+        });
+      }
     }
   };
 
@@ -468,11 +709,21 @@ export default function App() {
       prev.map((p) => {
         if (p.id === projectId) {
           const nextArchived = !p.archived;
-          return {
+          const updated: Project = {
             ...p,
             archived: nextArchived,
             archivedAt: nextArchived ? new Date().toISOString() : undefined,
           };
+
+          if (user) {
+            setSyncStatus('syncing');
+            saveFirestoreProject(user.uid, updated).catch((err) => {
+              console.error('Firestore project archive error:', err);
+              setSyncStatus('error');
+            });
+          }
+
+          return updated;
         }
         return p;
       })
@@ -484,13 +735,30 @@ export default function App() {
     setActiveView('project-detail');
   };
 
-  // Import Data Handler for atomic replacement
+  // Safe import JSON into active mode
   const handleImportData = (newItems: Item[], newProjects: Project[]): boolean => {
     try {
       setItems(newItems);
       setProjects(newProjects);
-      saveItems(newItems);
-      saveProjects(newProjects);
+      if (!user) {
+        saveItems(newItems);
+        saveProjects(newProjects);
+      } else {
+        setSyncStatus('syncing');
+        Promise.all([
+          ...newProjects.map((p) => saveFirestoreProject(user.uid, p)),
+          ...newItems.map((it) => saveFirestoreItem(user.uid, it)),
+        ])
+          .then(() => {
+            setSyncStatus('synced');
+            showToast('اطلاعات پشتیبان با موفقیت در حساب ابری بارگذاری شد.');
+          })
+          .catch((err) => {
+            console.error('Error importing to cloud:', err);
+            setSyncStatus('error');
+            showToast('خطا در ذخیره‌سازی داده‌های وارد شده در سرور ابری.');
+          });
+      }
       return true;
     } catch (err) {
       console.error('Import error:', err);
@@ -498,127 +766,115 @@ export default function App() {
     }
   };
 
-  // Expanded items for Today View (includes today's items + overdue unfinished occurrences from past 90 days)
-  const expandedItemsForToday = useMemo(() => {
-    return expandAllItems(items, todayDate, todayDate, {
+  // Migration Handlers
+  const handleExecuteMigration = async (resolution: CollisionResolution): Promise<MigrationResult> => {
+    if (!user) throw new Error('کاربر وارد نشده است.');
+    const localGuestItems = loadItems();
+    const localGuestProjects = loadProjects();
+
+    // Preserve local snapshot safety backup
+    try {
+      localStorage.setItem(
+        `karrooz_migration_backup_${Date.now()}`,
+        JSON.stringify({ items: localGuestItems, projects: localGuestProjects, date: new Date().toISOString() })
+      );
+    } catch (e) {
+      console.warn('Local backup snapshot error:', e);
+    }
+
+    const result = await migrateLocalDataToFirestore(user.uid, localGuestItems, localGuestProjects, resolution);
+    if (result.success) {
+      localStorage.setItem(`karrooz_migration_decided_${user.uid}`, 'migrated');
+      showToast(`انتقال ${toPersianDigits(result.migratedItemsCount)} مورد با موفقیت به سرور ابری انجام شد.`);
+    }
+    return result;
+  };
+
+  const handleDismissMigration = () => {
+    if (user) {
+      localStorage.setItem(`karrooz_migration_decided_${user.uid}`, 'skipped');
+    }
+    setMigrationModalState(null);
+    showToast('کار با حساب ابری بدون انتقال داده‌های محلی ادامه یافت.');
+  };
+
+  const handleOpenMigrationModalFromSettings = async () => {
+    if (!user) return;
+    const localGuestItems = loadItems();
+    const localGuestProjects = loadProjects();
+    try {
+      const cloudStatus = await fetchCloudStatus(user.uid);
+      const collidingItems = localGuestItems.filter((i) => cloudStatus.cloudItemIds.has(i.id)).length;
+      const collidingProjects = localGuestProjects.filter((p) => cloudStatus.cloudProjectIds.has(p.id)).length;
+      setMigrationModalState({
+        isOpen: true,
+        localItems: localGuestItems,
+        localProjects: localGuestProjects,
+        cloudItemsCount: cloudStatus.itemsCount,
+        cloudProjectsCount: cloudStatus.projectsCount,
+        collidingCount: collidingItems + collidingProjects,
+      });
+    } catch (err) {
+      showToast('خطا در بررسی وضعیت داده‌های ابری.');
+    }
+  };
+
+  // Expanded Items with recurring occurrences
+  const expandedItems = useMemo(() => {
+    return expandAllItems(items, addDays(todayDate, -60), addDays(todayDate, 90), {
       includeOverdueUnresolved: true,
-      pastHorizonDays: 90,
       todayStr: todayDate,
     });
   }, [items, todayDate]);
 
-  // Date-Based Logic for Today View
-  // 1. Overdue Deadlines: Incomplete tasks with dueDate < todayDate
-  // 2. Overdue Planned: Incomplete tasks with plannedDate < todayDate
-  // 3. Today Main Items: Items planned for today OR due today (deduplicated)
-  // 4. Completed Items
-  const {
-    overdueDeadlines,
-    overduePlanned,
-    todayActiveItems,
-    todayCompletedItems,
-    todayActiveCount,
-    totalNotesCount,
-  } = useMemo(() => {
-    // Filter by search query
-    let filtered = expandedItemsForToday;
-    const q = searchQuery.trim().toLowerCase();
-    if (q) {
-      filtered = filtered.filter((item) => {
-        const titleMatch = item.title.toLowerCase().includes(q);
-        const descMatch = item.description?.toLowerCase().includes(q) || false;
-        const projectMatch = item.project?.toLowerCase().includes(q) || false;
-        const tagMatch = item.tags?.some((t) => t.toLowerCase().includes(q)) || false;
-        return titleMatch || descMatch || projectMatch || tagMatch;
-      });
-    }
-
-    if (filter === 'tasks') {
-      filtered = filtered.filter((item) => item.type === 'task');
-    } else if (filter === 'notes') {
-      filtered = filtered.filter((item) => item.type === 'note');
-    }
-
-    // 1. Overdue Deadlines: Incomplete tasks whose dueDate < todayDate
-    const deadlinesOverdue = filtered.filter(
-      (item) =>
-        item.type === 'task' &&
-        !item.completed &&
-        item.status !== 'done' &&
-        Boolean(item.dueDate && item.dueDate < todayDate)
-    );
-
-    // 2. Overdue Planned: Incomplete tasks whose plannedDate < todayDate
-    const plannedOverdue = filtered.filter(
-      (item) =>
-        item.type === 'task' &&
-        !item.completed &&
-        item.status !== 'done' &&
-        Boolean(item.plannedDate && item.plannedDate < todayDate)
-    );
-
-    // 3. Main Today List: items planned for today OR incomplete tasks due today
-    // Deduplicated by ID so that an item planned for today and due today appears only once!
-    const todayMap = new Map<string, Item>();
-
-    for (const item of filtered) {
-      const isPlannedToday = item.plannedDate === todayDate;
-      const isDueToday =
-        item.type === 'task' && item.dueDate === todayDate && !item.completed && item.status !== 'done';
-
-      if (isPlannedToday || isDueToday) {
-        todayMap.set(item.id, item);
-      }
-    }
-
-    const todayAll = Array.from(todayMap.values());
-    const activeMain = todayAll.filter((item) => !item.completed && item.status !== 'done');
-    const completedMain = todayAll.filter(
-      (item) => item.type === 'task' && (item.completed || item.status === 'done')
-    );
-
-    // Unique open tasks count (never inflated by items appearing in multiple sections)
-    const uniqueOpenTaskIds = new Set<string>();
-    for (const t of activeMain) {
-      if (t.type === 'task') uniqueOpenTaskIds.add(t.id);
-    }
-    for (const t of plannedOverdue) {
-      uniqueOpenTaskIds.add(t.id);
-    }
-    for (const t of deadlinesOverdue) {
-      uniqueOpenTaskIds.add(t.id);
-    }
-
-    const notesCount = items.filter((item) => item.type === 'note').length;
-
-    return {
-      overdueDeadlines: deadlinesOverdue,
-      overduePlanned: plannedOverdue,
-      todayActiveItems: activeMain,
-      todayCompletedItems: completedMain,
-      todayActiveCount: uniqueOpenTaskIds.size,
-      totalNotesCount: notesCount,
-    };
-  }, [expandedItemsForToday, items, searchQuery, filter, todayDate]);
-
-  const activeProjectsCount = useMemo(() => {
-    return projects.filter((p) => !p.archived).length;
-  }, [projects]);
-
+  // Selected project resolution
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null;
     return projects.find((p) => p.id === selectedProjectId) || null;
-  }, [projects, selectedProjectId]);
+  }, [selectedProjectId, projects]);
 
-  const selectedSeriesItem = useMemo(() => {
-    if (!selectedSeriesModalId) return null;
-    return items.find((p) => p.id === selectedSeriesModalId) || null;
-  }, [items, selectedSeriesModalId]);
+  // Today Section Collections
+  const overdueDeadlines = useMemo(() => {
+    return expandedItems.filter(
+      (item) => item.type === 'task' && !item.completed && item.dueDate && item.dueDate < todayDate
+    );
+  }, [expandedItems, todayDate]);
+
+  const overduePlanned = useMemo(() => {
+    return expandedItems.filter(
+      (item) =>
+        item.type === 'task' &&
+        !item.completed &&
+        item.plannedDate &&
+        item.plannedDate < todayDate &&
+        (!item.dueDate || item.dueDate >= todayDate)
+    );
+  }, [expandedItems, todayDate]);
+
+  const todayActiveItems = useMemo(() => {
+    return expandedItems.filter(
+      (item) =>
+        !item.completed &&
+        ((item.plannedDate && item.plannedDate === todayDate) ||
+          (item.dueDate && item.dueDate === todayDate))
+    );
+  }, [expandedItems, todayDate]);
+
+  const todayCompletedItems = useMemo(() => {
+    return expandedItems.filter(
+      (item) =>
+        item.completed &&
+        ((item.plannedDate && item.plannedDate === todayDate) ||
+          (item.completedAt && item.completedAt.slice(0, 10) === todayDate))
+    );
+  }, [expandedItems, todayDate]);
+
+  const todayActiveCount = todayActiveItems.length;
+  const activeProjectsCount = useMemo(() => projects.filter((p) => !p.archived).length, [projects]);
+  const totalNotesCount = useMemo(() => items.filter((i) => i.type === 'note').length, [items]);
 
   const handleOpenQuickCaptureFromMobile = () => {
-    if (activeView !== 'today') {
-      setActiveView('today');
-    }
+    setActiveView('today');
     setTimeout(() => {
       captureSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
       const inputEl = captureSectionRef.current?.querySelector('input');
@@ -627,36 +883,36 @@ export default function App() {
   };
 
   return (
-    <AuthProvider>
-      <div className="min-h-screen bg-[#111216] text-[#E2E4E9] flex antialiased selection:bg-violet-500/25 selection:text-white pb-20 md:pb-0">
-        {/* Desktop Sidebar (RTL Right side) */}
-        <Sidebar
+    <div className="min-h-screen bg-app text-app flex antialiased selection:bg-accent selection:text-white pb-20 md:pb-0">
+      {/* Desktop Sidebar (RTL Right side) */}
+      <Sidebar
+        activeView={activeView}
+        filter={filter}
+        onNavigate={handleNavigate}
+        isSimpleMode={isSimpleMode}
+        onToggleSimpleMode={handleToggleSimpleMode}
+        onOpenBackupModal={() => setIsBackupModalOpen(true)}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        activeCount={todayActiveCount}
+        allWorkCount={items.length}
+        notesCount={totalNotesCount}
+        projectsCount={activeProjectsCount}
+      />
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Sticky Header with Contextual Title / Breadcrumbs and Simple Mode Toggle */}
+        <Header
           activeView={activeView}
-          filter={filter}
-          onNavigate={handleNavigate}
+          activeProject={selectedProject}
+          onNavigateToProjects={() => handleNavigate('projects')}
+          todayActiveCount={todayActiveCount}
+          activeProjectsCount={activeProjectsCount}
           isSimpleMode={isSimpleMode}
           onToggleSimpleMode={handleToggleSimpleMode}
-          onOpenBackupModal={() => setIsBackupModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          activeCount={todayActiveCount}
-          allWorkCount={items.length}
-          notesCount={totalNotesCount}
-          projectsCount={activeProjectsCount}
+          onNavigateToSettings={() => handleNavigate('settings')}
         />
-
-        {/* Main Content Area */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Sticky Header with Contextual Title / Breadcrumbs and Simple Mode Toggle */}
-          <Header
-            activeView={activeView}
-            activeProject={selectedProject}
-            onNavigateToProjects={() => handleNavigate('projects')}
-            todayActiveCount={todayActiveCount}
-            activeProjectsCount={activeProjectsCount}
-            isSimpleMode={isSimpleMode}
-            onToggleSimpleMode={handleToggleSimpleMode}
-            onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          />
 
         <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
           {/* VIEW 1: TODAY VIEW */}
@@ -764,9 +1020,22 @@ export default function App() {
             />
           )}
 
-          {/* Mobile Local Storage Indicator & Backup Trigger */}
+          {/* VIEW 6: SETTINGS VIEW */}
+          {activeView === 'settings' && (
+            <SettingsView
+              items={items}
+              projects={projects}
+              isSimpleMode={isSimpleMode}
+              onToggleSimpleMode={handleToggleSimpleMode}
+              onOpenBackupModal={() => setIsBackupModalOpen(true)}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
+              onOpenMigrationModal={handleOpenMigrationModalFromSettings}
+            />
+          )}
+
+          {/* Mobile Local / Cloud Storage Indicator */}
           <div className="md:hidden pt-3 pb-1 text-center text-[11px] text-gray-500 flex items-center justify-center gap-2">
-            <span>ذخیره محلی</span>
+            <span>{user ? (syncStatus === 'synced' ? 'همگام ابری' : 'ذخیره در سرور...') : 'ذخیره محلی'}</span>
             <span>·</span>
             <button
               type="button"
@@ -781,71 +1050,66 @@ export default function App() {
               onClick={() => setIsAuthModalOpen(true)}
               className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2 cursor-pointer"
             >
-              اتصال فایربیس
+              {user ? 'حساب کاربری' : 'ورود / فایربیس'}
             </button>
           </div>
         </main>
       </div>
 
-      {/* Floating Toast Notification for Filter Boundary Safety and Undo Actions */}
+      {/* Floating Toast Notification */}
       {toastMessage && (
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-md w-[calc(100%-2rem)] bg-[#1A1C26] border border-violet-500/40 text-violet-200 text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-xl shadow-black/50 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          className="fixed bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 bg-[#1F202B] text-gray-200 text-xs rounded-xl shadow-2xl border border-violet-500/40 animate-in fade-in slide-in-from-bottom-2 duration-150 max-w-[90vw] sm:max-w-md select-none"
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <Info className="w-4 h-4 text-violet-400 shrink-0" />
-            <span className="truncate">{toastMessage}</span>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {undoSkipInfo && (
-              <button
-                type="button"
-                onClick={handleUndoSkip}
-                className="text-xs font-semibold text-violet-300 hover:text-white bg-violet-900/50 hover:bg-violet-800/70 px-2 py-0.8 rounded border border-violet-700/60 cursor-pointer transition-colors"
-              >
-                بازگردانی
-              </button>
-            )}
+          <div className="w-2 h-2 rounded-full bg-violet-400 shrink-0" />
+          <span className="truncate flex-1">{toastMessage}</span>
+          {undoSkipInfo && (
             <button
               type="button"
-              onClick={() => {
-                setToastMessage(null);
-                setUndoSkipInfo(null);
-              }}
-              className="text-gray-400 hover:text-white p-0.5 rounded cursor-pointer"
-              aria-label="بستن پیام"
+              onClick={handleUndoSkip}
+              className="px-2 py-0.5 text-[11px] font-semibold text-violet-300 hover:text-white bg-violet-950/60 border border-violet-700/50 rounded-md transition-colors cursor-pointer shrink-0"
             >
-              <X className="w-4 h-4" />
+              بازگردانی
             </button>
-          </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="p-0.5 text-gray-400 hover:text-white transition-colors cursor-pointer shrink-0"
+            aria-label="بستن اعلان"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
-      {/* Item Detail / Editor Modal */}
-      <ItemEditorModal
-        item={editingItem}
-        projects={projects}
-        isOpen={Boolean(editingItem)}
-        onClose={() => setEditingItem(null)}
-        onSave={handleSaveItem}
-        onDelete={handleDeleteItem}
-        onOpenSeriesModal={(seriesId) => setSelectedSeriesModalId(seriesId)}
-      />
+      {/* Task / Note Editor Modal */}
+      {editingItem && (
+        <ItemEditorModal
+          isOpen={Boolean(editingItem)}
+          item={editingItem}
+          projects={projects}
+          onClose={() => setEditingItem(null)}
+          onSave={handleSaveItem}
+          onDelete={handleDeleteItem}
+          onOpenSeriesModal={(seriesId) => setSelectedSeriesModalId(seriesId)}
+        />
+      )}
 
-      {/* Series Management Modal */}
-      {selectedSeriesItem && (
+      {/* Recurrence Series Management Modal */}
+      {selectedSeriesModalId && (
         <SeriesModal
           isOpen={Boolean(selectedSeriesModalId)}
+          seriesItem={items.find((it) => it.id === selectedSeriesModalId) || null}
           onClose={() => setSelectedSeriesModalId(null)}
-          seriesItem={selectedSeriesItem}
           onStopSeries={handleStopSeries}
           onRestoreOccurrence={handleRestoreOccurrenceInModal}
         />
       )}
 
-      {/* Skip Occurrence Confirmation Dialog */}
+      {/* Skip Occurrence Confirmation Modal */}
       {skipConfirmOccurrence && (
         <div
           role="dialog"
@@ -921,6 +1185,21 @@ export default function App() {
         onClose={() => setIsAuthModalOpen(false)}
       />
 
+      {/* Explicit Local to Cloud Migration Modal */}
+      {migrationModalState && (
+        <MigrationModal
+          isOpen={migrationModalState.isOpen}
+          onClose={() => setMigrationModalState(null)}
+          localItems={migrationModalState.localItems}
+          localProjects={migrationModalState.localProjects}
+          cloudItemsCount={migrationModalState.cloudItemsCount}
+          cloudProjectsCount={migrationModalState.cloudProjectsCount}
+          collidingCount={migrationModalState.collidingCount}
+          onMigrate={handleExecuteMigration}
+          onDismissWithoutMigration={handleDismissMigration}
+        />
+      )}
+
       {/* Mobile Bottom Navigation */}
       <MobileNav
         activeView={activeView}
@@ -933,6 +1212,15 @@ export default function App() {
         projectsCount={activeProjectsCount}
       />
     </div>
-  </AuthProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <SettingsProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </SettingsProvider>
   );
 }

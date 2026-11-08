@@ -165,6 +165,10 @@
     "/users/{userId}/items/{itemId}": {
       "schema": "Item",
       "description": "User tasks and notes scoped strictly to the owner"
+    },
+    "/users/{userId}/telegram/{docId}": {
+      "schema": "object",
+      "description": "Server-controlled Telegram pairing and status document"
     }
   }
 }

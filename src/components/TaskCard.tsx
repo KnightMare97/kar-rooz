@@ -64,7 +64,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
           onClick(item);
         }
       }}
-      className={`group relative flex items-start gap-3 p-3.5 rounded-xl border transition-all text-right cursor-pointer select-none focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500/50 ${
+      className={`task-card group relative flex items-start gap-3 p-3.5 rounded-xl border transition-all text-right cursor-pointer select-none focus:outline-hidden focus-visible:ring-2 focus-visible:ring-violet-500/50 ${
         isCompleted
           ? 'bg-[#15161C]/70 border-[#23242E] opacity-75 hover:opacity-100 hover:border-[#2D2F3C]'
           : isDueOverdue

@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "karrooz-telegram-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "FIREBASE_PROJECT_ID": "gen-lang-client-0985101866",
+    "FIRESTORE_DATABASE_ID": "ai-studio-karrooz-88dd94b4-bce7-4ddc-8723-1bca334db048",
+    "APP_URL": "https://ais-dev-lpx6szyiww3uh6hos3kj3p-307986322384.europe-west1.run.app",
+    "TIMEZONE": "Asia/Tehran"
+  }
+}

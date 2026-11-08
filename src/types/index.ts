@@ -92,11 +92,37 @@ export interface Item {
 
 export type FilterType = 'all' | 'tasks' | 'notes';
 
-export type CalendarSystem = 'jalali' | 'gregorian';
-
-export type ActiveView = 'today' | 'all-work' | 'projects' | 'project-detail' | 'notes';
+export type ActiveView = 'today' | 'all-work' | 'projects' | 'project-detail' | 'notes' | 'settings';
 
 export type WorkViewTab = 'list' | 'kanban' | 'calendar';
+
+export type ThemeMode = 'dark' | 'light' | 'system';
+
+export type AccentColor = 'violet' | 'indigo' | 'emerald' | 'amber' | 'rose' | 'blue';
+
+export type CardDensity = 'comfortable' | 'compact';
+
+export type CalendarSystem = 'jalali' | 'gregorian';
+
+export type SyncStatus = 'local' | 'loading' | 'syncing' | 'synced' | 'offline' | 'error';
+
+export interface TelegramLinkState {
+  linked: boolean;
+  telegramChatId?: string;
+  telegramUsername?: string;
+  linkedAt?: string;
+  pendingPairingCode?: string;
+  pairingCodeExpiresAt?: string;
+}
+
+export interface AppSettings {
+  themeMode: ThemeMode;
+  accentColor: AccentColor;
+  cardDensity: CardDensity;
+  calendarSystem: CalendarSystem;
+  firstDayOfWeek: number; // 0 = Saturday (Shanbeh)
+  telegram: TelegramLinkState;
+}
 
 export const UNASSIGNED_PROJECT_ID = '__unassigned__';
 

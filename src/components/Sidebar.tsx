@@ -9,6 +9,7 @@ import {
   HardDrive,
   Database,
   CheckCircle2,
+  Settings,
 } from 'lucide-react';
 import { toPersianDigits } from '../utils/date';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,7 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   notesCount,
   projectsCount,
 }) => {
-  const { user } = useAuth();
+  const { user, syncStatus, hasPendingWrites } = useAuth();
   const isTodayActive = activeView === 'today';
   const isAllWorkActive = activeView === 'all-work';
   const isNotesActive = activeView === 'notes';
@@ -147,6 +148,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {toPersianDigits(notesCount)}
             </span>
           </button>
+
+          {/* 5. Settings */}
+          <button
+            type="button"
+            onClick={() => onNavigate('settings')}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'settings'
+                ? 'bg-[#252238] text-violet-200 border border-violet-500/30'
+                : 'text-gray-300 hover:bg-[#1E202B] hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Settings className="w-4 h-4 text-violet-400" />
+              <span>تنظیمات</span>
+            </div>
+          </button>
         </div>
 
         {/* Cloud & Firebase Integration Section */}
@@ -162,7 +179,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={onOpenAuthModal}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer border ${
                 user
-                  ? 'bg-emerald-950/25 border-emerald-800/40 text-emerald-200 hover:bg-emerald-950/40'
+                  ? syncStatus === 'syncing' || hasPendingWrites
+                    ? 'bg-amber-950/25 border-amber-800/40 text-amber-200 hover:bg-amber-950/40'
+                    : 'bg-emerald-950/25 border-emerald-800/40 text-emerald-200 hover:bg-emerald-950/40'
                   : 'bg-[#181922] border-[#262835] text-gray-300 hover:text-white hover:bg-[#1E202B]'
               }`}
               title="مشاهده وضعیت حساب کاربری، تست ارتباط با فایربیس و قوانین امنیتی"
@@ -176,11 +195,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span
                 className={`text-[10px] font-medium px-1.5 py-0.2 rounded ${
                   user
-                    ? 'text-emerald-300 bg-emerald-950/50 border border-emerald-800/50'
+                    ? syncStatus === 'syncing' || hasPendingWrites
+                      ? 'text-amber-300 bg-amber-950/50 border border-amber-800/50'
+                      : syncStatus === 'error'
+                      ? 'text-red-300 bg-red-950/50 border border-red-800/50'
+                      : 'text-emerald-300 bg-emerald-950/50 border border-emerald-800/50'
                     : 'text-violet-300 bg-violet-950/50 border border-violet-800/50'
                 }`}
               >
-                {user ? 'متصل' : 'ورود'}
+                {user
+                  ? syncStatus === 'syncing' || hasPendingWrites
+                    ? 'ذخیره...'
+                    : syncStatus === 'error'
+                    ? 'خطا'
+                    : 'همگام'
+                  : 'ورود'}
               </span>
             </button>
           </div>
@@ -191,8 +220,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-4 space-y-2 border-t border-[#222431] bg-[#121318]/50">
         <div className="pt-0.5 space-y-1.5">
           <div className="flex items-center gap-1.5 text-[11px] text-gray-500 px-1">
-            <HardDrive className="w-3 h-3 text-gray-500 shrink-0" />
-            <span>ذخیره محلی روی همین دستگاه</span>
+            {user ? (
+              <>
+                <Cloud className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span className="text-gray-400">همگام با پایگاه ابری Firestore</span>
+              </>
+            ) : (
+              <>
+                <HardDrive className="w-3 h-3 text-gray-500 shrink-0" />
+                <span>ذخیره محلی روی همین دستگاه</span>
+              </>
+            )}
           </div>
 
           <button

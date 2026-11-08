@@ -3,11 +3,24 @@
  * Safe migration with Schema Versioning (v1 -> v2 -> v3: Date-Based Planning)
  * Safe against disabled localStorage or private browsing restrictions
  */
-import { Item, Project, WorkViewTab, UNASSIGNED_PROJECT_ID } from '../types';
+import { Item, Project, WorkViewTab, UNASSIGNED_PROJECT_ID, AppSettings } from '../types';
 import { getTehranTodayDateString, addDays } from '../utils/date';
 
 const SCHEMA_VERSION_KEY = 'karrooz_schema_version';
 export const CURRENT_SCHEMA_VERSION = 4;
+
+const SETTINGS_KEY = 'karrooz_app_settings_v1';
+export const DEFAULT_APP_SETTINGS: AppSettings = {
+  themeMode: 'dark',
+  accentColor: 'violet',
+  cardDensity: 'comfortable',
+  calendarSystem: 'jalali',
+  firstDayOfWeek: 0,
+  telegram: {
+    linked: false,
+  },
+};
+let memoryAppSettings: AppSettings = { ...DEFAULT_APP_SETTINGS };
 
 const ITEMS_V1_KEY = 'karrooz_items_v1';
 const ITEMS_V2_KEY = 'karrooz_items_v2';
@@ -526,3 +539,39 @@ export function saveAllWorkShowArchived(show: boolean): void {
     }
   }
 }
+
+export function loadAppSettings(): AppSettings {
+  if (isLocalStorageAvailable()) {
+    try {
+      const raw = window.localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            ...DEFAULT_APP_SETTINGS,
+            ...parsed,
+            telegram: {
+              ...DEFAULT_APP_SETTINGS.telegram,
+              ...(parsed.telegram || {}),
+            },
+          };
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return memoryAppSettings;
+}
+
+export function saveAppSettings(settings: AppSettings): void {
+  memoryAppSettings = settings;
+  if (isLocalStorageAvailable()) {
+    try {
+      window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch {
+      // ignore
+    }
+  }
+}
+

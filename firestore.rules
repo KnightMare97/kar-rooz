@@ -65,6 +65,10 @@ service cloud.firestore {
         && (!('status' in data) || (data.status is string && data.status in ['todo', 'in_progress', 'done']))
         && (!('description' in data) || (data.description is string && data.description.size() <= 2000))
         && (!('projectId' in data) || (data.projectId is string && data.projectId.size() <= 128))
+        && (!('legacyProjectLabel' in data) || (data.legacyProjectLabel is string && data.legacyProjectLabel.size() <= 100))
+        && (!('project' in data) || (data.project is string && data.project.size() <= 100))
+        && (!('inToday' in data) || data.inToday is bool)
+        && (!('destination' in data) || (data.destination is string && data.destination.size() <= 20))
         && (!('tags' in data) || (data.tags is list && data.tags.size() <= 50))
         && (!('plannedDate' in data) || (data.plannedDate is string && data.plannedDate.size() <= 10))
         && (!('dueDate' in data) || (data.dueDate is string && data.dueDate.size() <= 10))
@@ -116,7 +120,8 @@ service cloud.firestore {
           && incoming().keys().hasAll(['id', 'userId', 'type', 'title', 'completed', 'createdAt'])
           && incoming().keys().hasOnly([
             'id', 'userId', 'type', 'title', 'description', 'completed', 'status',
-            'projectId', 'tags', 'createdAt', 'completedAt', 'plannedDate', 'dueDate',
+            'projectId', 'legacyProjectLabel', 'project', 'inToday', 'destination',
+            'tags', 'createdAt', 'completedAt', 'plannedDate', 'dueDate',
             'recurrence', 'occurrenceOverrides'
           ]);
         allow update: if isOwner(userId)
@@ -126,6 +131,13 @@ service cloud.firestore {
           && incoming().userId == existing().userId
           && incoming().createdAt == existing().createdAt;
         allow delete: if isOwner(userId) && isValidId(itemId);
+      }
+
+      // User Telegram Status (Read-only by owner, write-denied to client to prevent forging)
+      match /telegram/{docId} {
+        allow get: if isOwner(userId) && isValidId(docId);
+        allow list: if isOwner(userId);
+        allow write: if false; // Only server (Cloudflare Worker with Service Account) can write
       }
     }
 
