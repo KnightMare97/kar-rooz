@@ -677,19 +677,8 @@ const TelegramSettingsSection: React.FC<{
 
   const [copiedCode, setCopiedCode] = useState(false);
 
-  // Helper to fetch with local proxy first, falling back to direct worker URL
+  // Call Cloudflare Worker directly
   const fetchWorker = async (path: string, options: RequestInit = {}): Promise<Response> => {
-    // Attempt 1: Vite proxy route (eliminates browser CORS restrictions entirely)
-    try {
-      const proxyResp = await fetch(`/api/telegram${path}`, options);
-      if (proxyResp.status !== 404 && proxyResp.status !== 502) {
-        return proxyResp;
-      }
-    } catch {
-      // Proxy not available or failed, try direct
-    }
-
-    // Attempt 2: Direct workerUrl
     return await fetch(`${workerUrl}${path}`, options);
   };
 
@@ -703,6 +692,10 @@ const TelegramSettingsSection: React.FC<{
       });
       if (!resp.ok) {
         throw new Error(`پاسخ سرور ناموفق بود (${resp.status})`);
+      }
+      const contentType = resp.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`پاسخ دریافتی نامعتبر است (Content-Type: ${contentType})`);
       }
       const data = await resp.json();
       setWorkerHealth({
@@ -740,11 +733,12 @@ const TelegramSettingsSection: React.FC<{
       // 1. Retrieve real Firebase ID Token for authenticated user
       const idToken = await user.getIdToken(/* forceRefresh */ true);
 
-      // 2. Send authenticated POST request to Cloudflare Worker via proxy or direct
+      // 2. Send authenticated POST request directly to Cloudflare Worker
       const response = await fetchWorker('/api/pairing/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/json',
           Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({
@@ -752,7 +746,24 @@ const TelegramSettingsSection: React.FC<{
         }),
       });
 
-      const result = await response.json();
+      // Safely parse JSON or text response
+      const contentType = response.headers.get('content-type') || '';
+      let result: any = null;
+      let rawText = '';
+
+      if (contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        rawText = await response.text();
+        try {
+          result = JSON.parse(rawText);
+        } catch {
+          // Response is HTML or non-JSON text (e.g. 404/502 page from edge)
+          throw new Error(
+            `سرور ورکر به جای JSON، پاسخ متنی ارسال کرد (${response.status} ${response.statusText}). لطفاً مطمئن شوید فایل‌های جدید worker در GitHub منتشر و با Cloudflare همگام شده‌اند.`
+          );
+        }
+      }
 
       if (!response.ok || !result.ok) {
         if (result.code === 'FIREBASE_SERVICE_ACCOUNT_MISSING' || response.status === 503) {
@@ -773,7 +784,7 @@ const TelegramSettingsSection: React.FC<{
       let userFriendlyMsg = err.message || 'خطا در ارتباط با ورکر تلگرام.';
       if (userFriendlyMsg.includes('Failed to fetch') || userFriendlyMsg.includes('NetworkError')) {
         userFriendlyMsg =
-          'خطای شبکه در اتصال به Cloudflare Worker (Failed to fetch). لطفاً مطمئن شوید فایل worker/dist/index.js جدید در کلودفلر Deploy شده است.';
+          'خطای شبکه در اتصال به Cloudflare Worker (Failed to fetch). لطفاً مطمئن شوید کد جدید ورکر به GitHub منتقل و در Cloudflare مستقر شده است.';
       }
       setPairingError(userFriendlyMsg);
     } finally {
