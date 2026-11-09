@@ -108,6 +108,7 @@ export type SyncStatus = 'local' | 'loading' | 'syncing' | 'synced' | 'offline' 
 
 export interface TelegramLinkState {
   linked: boolean;
+  workerUrl?: string;
   telegramChatId?: string;
   telegramUsername?: string;
   linkedAt?: string;

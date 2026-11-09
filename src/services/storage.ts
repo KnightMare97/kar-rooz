@@ -18,6 +18,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   firstDayOfWeek: 0,
   telegram: {
     linked: false,
+    workerUrl: 'https://kar-rooz.mr-javdan97.workers.dev',
   },
 };
 let memoryAppSettings: AppSettings = { ...DEFAULT_APP_SETTINGS };
@@ -553,6 +554,7 @@ export function loadAppSettings(): AppSettings {
             telegram: {
               ...DEFAULT_APP_SETTINGS.telegram,
               ...(parsed.telegram || {}),
+              workerUrl: (parsed.telegram && parsed.telegram.workerUrl) || DEFAULT_APP_SETTINGS.telegram.workerUrl,
             },
           };
         }

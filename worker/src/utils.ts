@@ -122,59 +122,45 @@ export async function verifyFirebaseIdToken(
     return { valid: false, error: 'Token missing non-empty subject (UID).' };
   }
 
-  // 6. Cryptographic signature verification using Google's public JWK / x509 certs
+  // 6. Cryptographic signature verification using Google's public JWK Set (Fail-Closed)
   try {
-    const certsResp = await fetch(
-      'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
+    const jwksResp = await fetch(
+      'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'
     );
-    if (!certsResp.ok) {
-      return { valid: false, error: 'Failed to fetch Google public certificates for verification.' };
+    if (!jwksResp.ok) {
+      return { valid: false, error: 'Failed to fetch Google public key set (fail-closed).' };
     }
-    const certs = (await certsResp.json()) as Record<string, string>;
-    const certPem = certs[header.kid];
-    if (!certPem) {
-      return { valid: false, error: `Matching public key kid ${header.kid} not found in Google certs.` };
+    const jwks = (await jwksResp.json()) as { keys?: Array<JsonWebKey & { kid?: string }> };
+    const matchedJwk = (jwks.keys || []).find((k) => k.kid === header.kid);
+    if (!matchedJwk) {
+      return { valid: false, error: `Matching Google public key (kid: ${header.kid}) not found.` };
     }
 
-    // Clean cert to extract SPKI DER bytes
-    const certB64 = certPem
-      .replace(/-----BEGIN CERTIFICATE-----/g, '')
-      .replace(/-----END CERTIFICATE-----/g, '')
-      .replace(/\s+/g, '');
-    const certBytes = Uint8Array.from(atob(certB64), (c) => c.charCodeAt(0));
+    const cryptoKey = await crypto.subtle.importKey(
+      'jwk',
+      matchedJwk,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['verify']
+    );
 
-    // Import certificate to WebCrypto
-    // Note: WebCrypto importKey('spki') expects SubjectPublicKeyInfo. In WebCrypto, importKey with 'spki'
-    // requires the raw SPKI sequence. If not available directly from x509 without parser, we also support
-    // Google's JSON Web Key Set (JWKS) at https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
-    const jwksResp = await fetch('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com');
-    if (jwksResp.ok) {
-      const jwks = (await jwksResp.json()) as { keys: Array<JsonWebKey & { kid: string }> };
-      const matchedJwk = jwks.keys.find((k) => k.kid === header.kid);
-      if (matchedJwk) {
-        const cryptoKey = await crypto.subtle.importKey(
-          'jwk',
-          matchedJwk,
-          { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-          false,
-          ['verify']
-        );
-        const signedData = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-        const sigBytes = base64UrlDecode(signatureB64);
-        const isValidSig = await crypto.subtle.verify(
-          'RSASSA-PKCS1-v1_5',
-          cryptoKey,
-          sigBytes.buffer as ArrayBuffer,
-          signedData
-        );
-        if (!isValidSig) {
-          return { valid: false, error: 'Cryptographic signature verification failed.' };
-        }
-      }
+    const signedData = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
+    const sigBytes = base64UrlDecode(signatureB64);
+    const isValidSig = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      cryptoKey,
+      sigBytes.buffer as ArrayBuffer,
+      signedData
+    );
+
+    if (!isValidSig) {
+      return { valid: false, error: 'Cryptographic signature verification failed (fail-closed).' };
     }
   } catch (cryptoErr: any) {
-    console.warn('Certificate signature verification warning:', cryptoErr);
-    // If external certificate fetch fails due to network or offline test, fallback cleanly if test environment
+    return {
+      valid: false,
+      error: `Cryptographic signature check failed (fail-closed): ${cryptoErr.message || String(cryptoErr)}`,
+    };
   }
 
   return {

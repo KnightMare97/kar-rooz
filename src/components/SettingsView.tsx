@@ -641,81 +641,332 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* SECTION 4: TELEGRAM INTEGRATION (اتصال ربات تلگرام) */}
       {activeSection === 'telegram' && (
-        <div className="space-y-4">
-          <div className="p-4 sm:p-5 bg-[#15161D] border border-[#232532] rounded-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-100">ربات تلگرام کار روز</h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  ثبت سریع کارها، مرور کارهای امروز و تعیین زمان‌بندی از طریق چت تلگرام.
-                </p>
-              </div>
+        <TelegramSettingsSection user={user} settings={settings} />
+      )}
+    </div>
+  );
+};
 
-              {/* Status Indicator: Real & Honest */}
+/**
+ * Subcomponent managing real live interaction with Cloudflare Worker and Telegram pairing
+ */
+const TelegramSettingsSection: React.FC<{
+  user: any;
+  settings: any;
+}> = ({ user, settings }) => {
+  const workerUrl =
+    settings.telegram?.workerUrl ||
+    (import.meta as any).env?.VITE_TELEGRAM_WORKER_URL ||
+    'https://kar-rooz.mr-javdan97.workers.dev';
+
+  const [workerHealth, setWorkerHealth] = useState<{
+    loading: boolean;
+    healthy?: boolean;
+    status?: string;
+    configured?: { telegram: boolean; firestore: boolean; appUrl: boolean };
+    error?: string;
+  }>({ loading: true });
+
+  const [generating, setGenerating] = useState(false);
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [generatedPairing, setGeneratedPairing] = useState<{
+    code: string;
+    expiresAt: string;
+    botUsername?: string;
+  } | null>(null);
+
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  // Helper to fetch with local proxy first, falling back to direct worker URL
+  const fetchWorker = async (path: string, options: RequestInit = {}): Promise<Response> => {
+    // Attempt 1: Vite proxy route (eliminates browser CORS restrictions entirely)
+    try {
+      const proxyResp = await fetch(`/api/telegram${path}`, options);
+      if (proxyResp.status !== 404 && proxyResp.status !== 502) {
+        return proxyResp;
+      }
+    } catch {
+      // Proxy not available or failed, try direct
+    }
+
+    // Attempt 2: Direct workerUrl
+    return await fetch(`${workerUrl}${path}`, options);
+  };
+
+  // Check live status of Cloudflare Worker on mount
+  const checkWorkerHealth = async () => {
+    setWorkerHealth((prev) => ({ ...prev, loading: true, error: undefined }));
+    try {
+      const resp = await fetchWorker('/health', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!resp.ok) {
+        throw new Error(`پاسخ سرور ناموفق بود (${resp.status})`);
+      }
+      const data = await resp.json();
+      setWorkerHealth({
+        loading: false,
+        healthy: data.status === 'healthy',
+        status: data.status,
+        configured: data.configured,
+        error: data.verified?.error,
+      });
+    } catch (err: any) {
+      setWorkerHealth({
+        loading: false,
+        healthy: false,
+        status: 'network_error',
+        error: `خطا در برقراری ارتباط با ورکر (${err.message})`,
+      });
+    }
+  };
+
+  React.useEffect(() => {
+    checkWorkerHealth();
+  }, [workerUrl]);
+
+  // Request authenticated pairing code from worker using Firebase ID Token
+  const handleGeneratePairing = async () => {
+    if (!user) {
+      setPairingError('برای دریافت کد اتصال، ابتدا باید وارد حساب گوگل خود شوید.');
+      return;
+    }
+
+    setGenerating(true);
+    setPairingError(null);
+
+    try {
+      // 1. Retrieve real Firebase ID Token for authenticated user
+      const idToken = await user.getIdToken(/* forceRefresh */ true);
+
+      // 2. Send authenticated POST request to Cloudflare Worker via proxy or direct
+      const response = await fetchWorker('/api/pairing/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          userEmail: user.email || undefined,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        if (result.code === 'FIREBASE_SERVICE_ACCOUNT_MISSING' || response.status === 503) {
+          throw new Error(
+            'کلید سرویس فایربیس (FIREBASE_SERVICE_ACCOUNT_JSON) در متغیرهای Cloudflare Worker هنوز تنظیم نشده است. لطفاً کلید Service Account را در داشبورد ورکر ثبت فرمایید.'
+          );
+        }
+        throw new Error(result.error || `خطا در دریافت کد اتصال (${response.status})`);
+      }
+
+      setGeneratedPairing({
+        code: result.pairingCode,
+        expiresAt: result.expiresAt,
+        botUsername: result.botUsername || 'KarRoozBot',
+      });
+    } catch (err: any) {
+      console.error('Error generating Telegram pairing code:', err);
+      let userFriendlyMsg = err.message || 'خطا در ارتباط با ورکر تلگرام.';
+      if (userFriendlyMsg.includes('Failed to fetch') || userFriendlyMsg.includes('NetworkError')) {
+        userFriendlyMsg =
+          'خطای شبکه در اتصال به Cloudflare Worker (Failed to fetch). لطفاً مطمئن شوید فایل worker/dist/index.js جدید در کلودفلر Deploy شده است.';
+      }
+      setPairingError(userFriendlyMsg);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2500);
+    });
+  };
+
+  const isFirestoreMissingOnWorker =
+    workerHealth.configured && workerHealth.configured.firestore === false;
+
+  return (
+    <div className="space-y-4">
+      <div className="p-4 sm:p-5 bg-[#15161D] border border-[#232532] rounded-2xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-100">ربات تلگرام کار روز</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              ثبت سریع کارها، مرور کارهای امروز و تعیین زمان‌بندی از طریق چت تلگرام.
+            </p>
+          </div>
+
+          {/* Dynamic Status Indicator based on live worker health */}
+          <div className="flex items-center gap-2">
+            {workerHealth.loading ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-gray-400 bg-gray-800/40 border border-gray-700/40 px-2.5 py-1 rounded-full font-medium">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                <span>بررسی وضعیت سرور...</span>
+              </span>
+            ) : workerHealth.healthy ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-800/40 px-2.5 py-1 rounded-full font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>سرور ورکر آماده اتصال</span>
+              </span>
+            ) : isFirestoreMissingOnWorker ? (
               <span className="inline-flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/40 border border-amber-800/40 px-2.5 py-1 rounded-full font-medium">
                 <AlertCircle className="w-3.5 h-3.5" />
-                <span>هنوز پیکربندی نشده</span>
+                <span>نیازمند کلید سرویس فایربیس</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-xs text-rose-300 bg-rose-950/40 border border-rose-800/40 px-2.5 py-1 rounded-full font-medium">
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>عدم پاسخ ورکر</span>
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={checkWorkerHealth}
+              disabled={workerHealth.loading}
+              title="بررسی مجدد ارتباط"
+              className="p-1.5 rounded-lg border border-[#272937] text-gray-400 hover:text-gray-200 hover:bg-[#1F212D] transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${workerHealth.loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Real Live Endpoint Info */}
+        <div className="p-3 rounded-xl bg-[#14151C] border border-[#242633] space-y-1.5 text-[11px] text-gray-400 font-mono">
+          <div className="flex items-center justify-between">
+            <span>آدرس Cloudflare Worker:</span>
+            <span className="text-violet-300 truncate max-w-[260px]" title={workerUrl}>
+              {workerUrl}
+            </span>
+          </div>
+          {workerHealth.configured && (
+            <div className="flex items-center justify-between">
+              <span>وضعیت تنظیمات ورکر:</span>
+              <span className="text-gray-200">
+                تلگرام: {workerHealth.configured.telegram ? '✓' : '✗'} | فایربیس:{' '}
+                {workerHealth.configured.firestore ? '✓' : '✗ ناقص'}
               </span>
             </div>
+          )}
+        </div>
 
-            {/* Architecture Explanatory Banner */}
-            <div className="p-3.5 rounded-xl bg-[#14151C] border border-[#262835] space-y-2 text-xs text-gray-300 leading-relaxed">
-              <div className="flex items-center gap-2 text-violet-300 font-semibold">
-                <ShieldCheck className="w-4 h-4 shrink-0" />
-                <span>معماری امن بدون شبیه‌سازی محلی</span>
-              </div>
+        {/* Missing Service Account Warning Banner */}
+        {isFirestoreMissingOnWorker && (
+          <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-800/40 flex items-start gap-3">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-1 text-xs text-amber-200 leading-relaxed">
+              <span className="font-semibold block">کلید Service Account در ورکر ثبت نشده است</span>
               <p className="text-[11px] text-gray-400 leading-relaxed">
-                برای حفظ امنیت و جلوگیری از جعل هویت تلگرام، تولید کد اتصال منحصراً از طریق توکن‌های
-                یک‌بار مصرف سرورلس در Cloudflare Worker و متصل به شناسه کاربر احراز هویت شده انجام خواهد شد.
-                کد کلاینتی شبیه‌سازی‌شده ایجاد نمی‌شود.
+                ورکر تلگرام منتشر شده است، اما برای خواندن و نوشتن وظایف در پایگاه فایربیس، متغیر محیطی{' '}
+                <code className="text-violet-300 font-mono">FIREBASE_SERVICE_ACCOUNT_JSON</code> باید در تنظیمات ورکر
+                کلودفلر (Workers &gt; Settings &gt; Variables &amp; Secrets) تعریف شود.
+                <br />
+                <span className="text-amber-300/90 font-medium">
+                  نکته امنیتی: این کلید هرگز نباید در کد فرانت‌اند یا ریپازیتوری ذخیره شود.
+                </span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Pairing Generation Card */}
+        <div className="p-4 rounded-xl bg-[#181922] border border-[#262835] space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <span className="text-xs font-semibold text-gray-200">کد اتصال حساب کاربری</span>
+              <p className="text-[11px] text-gray-400">
+                {!user
+                  ? 'برای دریافت کد اتصال، ابتدا باید با حساب گوگل خود وارد شوید.'
+                  : 'با کلیک روی دکمه زیر، یک کد اتصال یک‌بار مصرف با اعتبار ۱۰ دقیقه برای حساب شما صادر می‌شود.'}
               </p>
             </div>
 
-            {/* Server-Side Pairing State Box */}
-            <div className="p-4 rounded-xl bg-[#181922] border border-[#262835] space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="space-y-0.5">
-                  <span className="text-xs font-semibold text-gray-200">وضعیت اتصال به ربات</span>
-                  <p className="text-[11px] text-gray-400">
-                    {user
-                      ? 'نیازمند استقرار Cloudflare Worker و ثبت Webhook تلگرام'
-                      : 'برای اتصال تلگرام، ابتدا باید وارد حساب کاربری گوگل خود شوید.'}
-                  </p>
-                </div>
+            <button
+              type="button"
+              onClick={handleGeneratePairing}
+              disabled={!user || generating}
+              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-xl transition-colors cursor-pointer shadow-xs whitespace-nowrap shrink-0 ${
+                !user || generating
+                  ? 'bg-[#14151B] text-gray-500 border border-[#292B3A] cursor-not-allowed opacity-60'
+                  : 'bg-violet-600 hover:bg-violet-700 text-white border border-violet-500/50'
+              }`}
+            >
+              {generating ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>در حال اعتبارسنجی توکن...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  <span>تولید کد اتصال</span>
+                </>
+              )}
+            </button>
+          </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={true}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-gray-400 bg-[#14151B] border border-[#292B3A] rounded-lg cursor-not-allowed opacity-60 whitespace-nowrap"
-                    title="تولید کد مستلزم استقرار ورکر در کلودفلر است"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>تولید کد اتصال (نیازمند ورکر)</span>
-                  </button>
-                </div>
-              </div>
+          {/* Pairing Error Feedback */}
+          {pairingError && (
+            <div className="p-3 rounded-lg bg-red-950/30 border border-red-800/40 text-xs text-red-300 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{pairingError}</span>
             </div>
+          )}
 
-            {/* Setup Guidance Alert */}
-            <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-800/30 flex items-start gap-3">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="space-y-1.5 text-xs text-gray-300 leading-relaxed">
-                <span className="font-semibold text-amber-200 block">
-                  مراحل پیش‌نیاز راه‌اندازی ربات
+          {/* Generated Code Display Box */}
+          {generatedPairing && (
+            <div className="p-4 rounded-xl bg-[#14151C] border border-violet-500/40 space-y-3 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-300 font-medium">کد اختصاصی شما:</span>
+                <span className="text-[11px] text-amber-400">مهلت استفاده: ۱۰ دقیقه</span>
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-[#1B1D28] border border-[#2C2E3E] rounded-xl">
+                <span className="font-mono text-lg font-bold text-violet-300 tracking-wider">
+                  {generatedPairing.code}
                 </span>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  فایل‌های آماده استقرار در پوشه <code className="text-violet-300 font-mono">worker/</code> قرار دارند.
-                  پس از کپی محتوای <code className="text-violet-300 font-mono">worker/dist/index.js</code> در داشبورد Cloudflare
-                  و تنظیم متغیرهای محرمانه <code className="text-violet-300 font-mono">TELEGRAM_BOT_TOKEN</code> و{' '}
-                  <code className="text-violet-300 font-mono">TELEGRAM_WEBHOOK_SECRET</code>،
-                  اتصال به صورت امن و دوطرفه فعال خواهد شد.
+
+                <button
+                  type="button"
+                  onClick={() => handleCopyCode(generatedPairing.code)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-200 hover:text-white bg-[#262838] hover:bg-[#2F3246] rounded-lg transition-colors cursor-pointer"
+                >
+                  {copiedCode ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-300">کپی شد</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>کپی کد</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="text-[11px] text-gray-400 space-y-1 leading-relaxed">
+                <p>
+                  اکنون کافی است در تلگرام وارد ربات خود شوید و دستور زیر را ارسال کنید:
+                </p>
+                <div className="p-2 bg-[#12131A] rounded-lg font-mono text-violet-200 text-xs text-left" dir="ltr">
+                  /start {generatedPairing.code}
+                </div>
+                <p className="text-gray-400 text-[10px]">
+                  پس از ارسال، حساب تلگرام شما بلافاصله به وظایف و برنامه‌ریزی‌های این حساب کاربری متصل می‌شود.
                 </p>
               </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };

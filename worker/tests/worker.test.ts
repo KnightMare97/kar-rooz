@@ -192,6 +192,112 @@ describe('7. Identity & Token Verification (/api/pairing/generate)', () => {
     const body = (await res.json()) as any;
     assert.match(body.error, /Identity verification failed/i);
   });
+
+  test('returns 503 with informative error when FIREBASE_SERVICE_ACCOUNT_JSON is missing on Worker', async () => {
+    const req = new Request('https://worker.local/api/pairing/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer any.token',
+      },
+      body: JSON.stringify({}),
+    });
+
+    const res = await workerHandler.fetch(req, {
+      // FIREBASE_SERVICE_ACCOUNT_JSON omitted intentionally
+      FIREBASE_PROJECT_ID: 'gen-lang-client-0985101866',
+    });
+
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as any;
+    assert.equal(body.code, 'FIREBASE_SERVICE_ACCOUNT_MISSING');
+    assert.match(body.error, /FIREBASE_SERVICE_ACCOUNT_JSON/i);
+  });
+
+  test('supports CORS preflight OPTIONS request with exact Origin, 204, and Vary: Origin', async () => {
+    const origin = 'https://ais-dev-lpx6szyiww3uh6hos3kj3p-307986322384.europe-west1.run.app';
+    const req = new Request('https://worker.local/api/pairing/generate', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: origin,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'Authorization, Content-Type',
+      },
+    });
+
+    const res = await workerHandler.fetch(req, {});
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get('Access-Control-Allow-Origin'), origin);
+    assert.equal(res.headers.get('Access-Control-Allow-Methods'), 'GET, POST, OPTIONS');
+    assert.equal(res.headers.get('Access-Control-Allow-Headers'), 'Authorization, Content-Type');
+    assert.equal(res.headers.get('Vary'), 'Origin');
+  });
+
+  test('GET /health returns Access-Control-Allow-Origin matching allowed Origin and Vary: Origin', async () => {
+    const origin = 'https://ais-dev-lpx6szyiww3uh6hos3kj3p-307986322384.europe-west1.run.app';
+    const req = new Request('https://worker.local/health', {
+      method: 'GET',
+      headers: { Origin: origin },
+    });
+
+    const res = await workerHandler.fetch(req, {
+      FIREBASE_PROJECT_ID: 'gen-lang-client-0985101866',
+      FIRESTORE_DATABASE_ID: 'ai-studio-karrooz-88dd94b4-bce7-4ddc-8723-1bca334db048',
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('Access-Control-Allow-Origin'), origin);
+    assert.equal(res.headers.get('Vary'), 'Origin');
+    const body = (await res.json()) as any;
+    assert.equal(body.service, 'karrooz-telegram-worker');
+  });
+
+  test('POST /api/pairing/generate error responses (401, 503) include Access-Control-Allow-Origin and Vary: Origin', async () => {
+    const origin = 'https://ais-dev-lpx6szyiww3uh6hos3kj3p-307986322384.europe-west1.run.app';
+
+    // 401 error response
+    const req401 = new Request('https://worker.local/api/pairing/generate', {
+      method: 'POST',
+      headers: {
+        Origin: origin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    const fakeServiceAccount = JSON.stringify({
+      client_email: 'test@example.iam.gserviceaccount.com',
+      private_key: '-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQD...==\n-----END PRIVATE KEY-----',
+    });
+
+    const res401 = await workerHandler.fetch(req401, {
+      FIREBASE_SERVICE_ACCOUNT_JSON: fakeServiceAccount,
+      FIREBASE_PROJECT_ID: 'gen-lang-client-0985101866',
+    });
+
+    assert.equal(res401.status, 401);
+    assert.equal(res401.headers.get('Access-Control-Allow-Origin'), origin);
+    assert.equal(res401.headers.get('Vary'), 'Origin');
+
+    // 503 error response
+    const req503 = new Request('https://worker.local/api/pairing/generate', {
+      method: 'POST',
+      headers: {
+        Origin: origin,
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer any.token',
+      },
+      body: JSON.stringify({}),
+    });
+
+    const res503 = await workerHandler.fetch(req503, {
+      FIREBASE_PROJECT_ID: 'gen-lang-client-0985101866',
+    });
+
+    assert.equal(res503.status, 503);
+    assert.equal(res503.headers.get('Access-Control-Allow-Origin'), origin);
+    assert.equal(res503.headers.get('Vary'), 'Origin');
+  });
 });
 
 describe('8. Today Selection & Stale Flag Exclusion', () => {

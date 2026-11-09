@@ -92,9 +92,62 @@ function getFirestoreClient(env: Env): FirestoreRestClient | null {
   }
 }
 
+/**
+ * Allowlist of valid frontend origins for KarRooz
+ */
+const ALLOWED_ORIGINS = [
+  'https://ais-dev-lpx6szyiww3uh6hos3kj3p-307986322384.europe-west1.run.app',
+  'https://ais-pre-lpx6szyiww3uh6hos3kj3p-307986322384.europe-west1.run.app',
+  'http://localhost:3000',
+  'http://localhost:5173',
+];
+
+/**
+ * Derives CORS headers for requests from allowed origins
+ */
+function getCorsHeaders(request: Request, env?: Env): Record<string, string> {
+  const origin = request.headers.get('Origin') || '';
+  const appUrl = env?.APP_URL ? new URL(env.APP_URL).origin : null;
+
+  const isAllowed =
+    ALLOWED_ORIGINS.includes(origin) ||
+    (appUrl && origin === appUrl) ||
+    (origin.endsWith('.run.app') && origin.includes('307986322384'));
+
+  const allowOrigin = isAllowed ? origin : ALLOWED_ORIGINS[0];
+
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const corsHeaders = getCorsHeaders(request, env);
+
+    // Handle OPTIONS Preflight for browser requests
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
+    }
+
+    // Helper to send json responses with CORS headers
+    const jsonResponse = (data: any, status = 200) => {
+      return new Response(JSON.stringify(data, null, 2), {
+        status,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    };
 
     // 1. Health check and diagnostic endpoint
     if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
@@ -123,43 +176,38 @@ export default {
 
       const allConfigured = isTelegramConfigured && isFirebaseConfigured && isAppUrlConfigured;
 
-      return new Response(
-        JSON.stringify(
-          {
-            service: 'karrooz-telegram-worker',
-            status: allConfigured && databaseConnected ? 'healthy' : 'configuration_required',
-            time: new Date().toISOString(),
-            configured: {
-              telegram: isTelegramConfigured,
-              firestore: isFirebaseConfigured,
-              appUrl: isAppUrlConfigured,
-              projectId: env.FIREBASE_PROJECT_ID || 'gen-lang-client-0985101866',
-              databaseId: env.FIRESTORE_DATABASE_ID || 'ai-studio-karrooz-88dd94b4-bce7-4ddc-8723-1bca334db048',
-            },
-            verified: {
-              googleAuth: authenticated,
-              firestoreDatabase: databaseConnected,
-              error: firestoreError,
-            },
-            notes: 'Send POST requests to /webhook with X-Telegram-Bot-Api-Secret-Token header.',
-          },
-          null,
-          2
-        ),
-        {
-          headers: { 'Content-Type': 'application/json' },
-          status: 200,
-        }
-      );
+      return jsonResponse({
+        service: 'karrooz-telegram-worker',
+        status: allConfigured && databaseConnected ? 'healthy' : 'configuration_required',
+        time: new Date().toISOString(),
+        configured: {
+          telegram: isTelegramConfigured,
+          firestore: isFirebaseConfigured,
+          appUrl: isAppUrlConfigured,
+          projectId: env.FIREBASE_PROJECT_ID || 'gen-lang-client-0985101866',
+          databaseId: env.FIRESTORE_DATABASE_ID || 'ai-studio-karrooz-88dd94b4-bce7-4ddc-8723-1bca334db048',
+        },
+        verified: {
+          googleAuth: authenticated,
+          firestoreDatabase: databaseConnected,
+          error: firestoreError,
+        },
+        notes: 'Send POST requests to /webhook with X-Telegram-Bot-Api-Secret-Token header.',
+      });
     }
 
     // 2. Authenticated Pairing Code Generation Endpoint (Called by Web App)
     if (request.method === 'POST' && url.pathname === '/api/pairing/generate') {
       const db = getFirestoreClient(env);
       if (!db) {
-        return new Response(
-          JSON.stringify({ ok: false, error: 'Firestore backend service account is not configured on Worker.' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        return jsonResponse(
+          {
+            ok: false,
+            code: 'FIREBASE_SERVICE_ACCOUNT_MISSING',
+            error:
+              'کلید سرویس فایربیس (FIREBASE_SERVICE_ACCOUNT_JSON) در تنظیمات Cloudflare Worker تنظیم نشده است. لطفاً متغیرهای محیطی ورکر را تکمیل فرمایید.',
+          },
+          503
         );
       }
 
@@ -179,32 +227,29 @@ export default {
       } catch {
         // Body was either empty or invalid JSON; if no authHeader, fail
         if (!idToken) {
-          return new Response(JSON.stringify({ ok: false, error: 'Missing authentication credentials.' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
+          return jsonResponse({ ok: false, error: 'Missing authentication credentials.' }, 401);
         }
       }
 
       if (!idToken) {
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             ok: false,
             error: 'Authentication required: Firebase ID Token must be provided in Authorization header or body.',
-          }),
-          { status: 401, headers: { 'Content-Type': 'application/json' } }
+          },
+          401
         );
       }
 
       const projectId = env.FIREBASE_PROJECT_ID || 'gen-lang-client-0985101866';
       const verifyResult = await verifyFirebaseIdToken(idToken, projectId);
       if (!verifyResult.valid) {
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             ok: false,
             error: `Identity verification failed: ${verifyResult.error}`,
-          }),
-          { status: 401, headers: { 'Content-Type': 'application/json' } }
+          },
+          401
         );
       }
 
@@ -214,21 +259,18 @@ export default {
 
       try {
         const pairing = await createPairingRecord(db, authenticatedUid, verifiedEmail);
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             ok: true,
             pairingCode: pairing.code,
             expiresAt: pairing.expiresAt,
             botUsername: 'KarRoozBot',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          },
+          200
         );
       } catch (err: any) {
         console.error('Error generating pairing record:', err);
-        return new Response(JSON.stringify({ ok: false, error: err.message || 'Failed to create pairing.' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ ok: false, error: err.message || 'Failed to create pairing.' }, 500);
       }
     }
 
@@ -308,7 +350,10 @@ export default {
       }
     }
 
-    return new Response('Not Found', { status: 404 });
+    return new Response('Not Found', {
+      status: 404,
+      headers: corsHeaders,
+    });
   },
 };
 
