@@ -48,6 +48,7 @@ import { BackupModal } from './components/BackupModal';
 import { AuthModal } from './components/AuthModal';
 import { MigrationModal } from './components/MigrationModal';
 import { SettingsView } from './components/SettingsView';
+import { LoginView } from './components/LoginView';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import {
@@ -84,8 +85,8 @@ function AppContent() {
     setSyncError,
   } = useAuth();
 
-  const [items, setItems] = useState<Item[]>(() => loadItems());
-  const [projects, setProjects] = useState<Project[]>(() => loadProjects());
+  const [items, setItems] = useState<Item[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [activeView, setActiveView] = useState<ActiveView>('today');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
@@ -142,25 +143,11 @@ function AppContent() {
     };
   }, []);
 
-  // Save guest data strictly to local storage when not authenticated
+  // Keep pre-existing local storage intact; do not auto-wipe or overwrite with empty state
   useEffect(() => {
     if (!user) {
-      saveItems(items);
-    }
-  }, [items, user]);
-
-  useEffect(() => {
-    if (!user) {
-      saveProjects(projects);
-    }
-  }, [projects, user]);
-
-  // Firestore Realtime Subscriptions & User Lifecycle
-  useEffect(() => {
-    if (!user) {
-      // Revert cleanly to device local storage when signed out
-      setItems(loadItems());
-      setProjects(loadProjects());
+      setItems([]);
+      setProjects([]);
       setSyncStatus('local');
       setHasPendingWrites(false);
       setSyncError(null);
@@ -1215,11 +1202,54 @@ function AppContent() {
   );
 }
 
+function AppRoot() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full bg-[#0F1016] flex flex-col items-center justify-center p-4 select-none">
+        <div className="relative mb-4">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600/30 to-violet-900/20 border border-violet-500/40 flex items-center justify-center shadow-lg shadow-violet-950/50">
+            <svg
+              className="w-8 h-8 text-violet-400 animate-pulse"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+              <path d="m9 16 2 2 4-4" />
+            </svg>
+          </div>
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#14151C] border border-violet-500/40 flex items-center justify-center">
+            <div className="w-2.5 h-2.5 rounded-full bg-violet-400 animate-ping" />
+          </div>
+        </div>
+        <h2 className="text-base font-semibold text-gray-200 tracking-tight mb-1">کار روز</h2>
+        <p className="text-xs text-gray-400">در حال بررسی وضعیت ورود...</p>
+      </div>
+    );
+  }
+
+  // Requirement 1: If user is not authenticated, show ONLY the calm, mobile-friendly Persian login view
+  if (!user) {
+    return <LoginView />;
+  }
+
+  // Requirement 1: After successful login, display user's workspace
+  return <AppContent />;
+}
+
 export default function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
-        <AppContent />
+        <AppRoot />
       </AuthProvider>
     </SettingsProvider>
   );

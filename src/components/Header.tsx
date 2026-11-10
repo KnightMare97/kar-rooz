@@ -2,6 +2,7 @@ import { Eye, EyeOff, ArrowRight, User as UserIcon, Database, Settings, CheckCir
 import { getTodayPersianDateString, toPersianDigits } from '../utils/date';
 import { useAuth } from '../contexts/AuthContext';
 import { ActiveView, Project } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   activeView: ActiveView;
@@ -137,8 +138,9 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Action Controls: Firebase Account & Simple Mode & Settings Toggle */}
+        {/* Action Controls: PWA Install & Firebase Account & Simple Mode & Settings Toggle */}
         <div className="flex items-center gap-2 shrink-0">
+          <PWAInstallButton />
           {/* Settings Shortcut Button */}
           {onNavigateToSettings && (
             <button

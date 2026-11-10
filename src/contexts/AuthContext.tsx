@@ -72,13 +72,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Re-test connection upon sign-in
       testConnection().then((res) => setConnectionResult(res));
     } catch (err: any) {
-      // Don't treat user-closed-popup as a fatal bug, but show gentle message if needed
-      if (err.code === 'auth/popup-closed-by-user') {
+      // Friendly Persian error translation
+      if (err?.code === 'auth/popup-closed-by-user') {
         setAuthError('پنجره ورود توسط کاربر بسته شد.');
-      } else if (err.code === 'auth/cancelled-popup-request') {
-        setAuthError('درخواست ورود لغو شد.');
+      } else if (err?.code === 'auth/cancelled-popup-request') {
+        setAuthError('درخواست قبلی ورود لغو شد.');
+      } else if (err?.code === 'auth/popup-blocked') {
+        setAuthError('مرورگر باز شدن پنجره ورود را مسدود کرد. لطفاً به مرورگر اجازه باز کردن پنجره (Pop-up) بدهید.');
+      } else if (err?.code === 'auth/network-request-failed') {
+        setAuthError('خطای ارتباط با شبکه اینترنت. لطفاً اتصال خود را بررسی کرده و مجدداً تلاش کنید.');
+      } else if (err?.code === 'auth/unauthorized-domain') {
+        setAuthError('دامنه فعلی در فهرست دامنه‌های مجاز فایربیس ثبت نشده است.');
+      } else if (err?.code === 'auth/operation-not-allowed') {
+        setAuthError('روش ورود با گوگل در تنظیمات فایربیس فعال نیست.');
       } else {
-        setAuthError(err.message || 'خطا در ورود با گوگل');
+        setAuthError(err?.message || 'خطا در برقراری ارتباط و ورود با گوگل');
       }
     }
   };

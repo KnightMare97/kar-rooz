@@ -3,6 +3,7 @@ import { Item, Project } from '../types';
 import { useSettings, ACCENT_PRESETS } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { toPersianDigits } from '../utils/date';
+import { PWAInstallButton } from './PWAInstallButton';
 import {
   Palette,
   Calendar as CalendarIcon,
@@ -564,6 +565,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               </div>
             )}
+
+            {/* PWA App Installation (if browser supports and app not yet installed) */}
+            <PWAInstallButton variant="settings" />
 
             {/* Backend Architecture Details */}
             <div className="p-3 rounded-xl bg-[#14151C] border border-[#242633] space-y-1.5 text-[11px] text-gray-400 font-mono">
