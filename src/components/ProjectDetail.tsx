@@ -3,6 +3,7 @@ import { Project, Item, KanbanStatus, ItemType, WorkViewTab } from '../types';
 import { KanbanBoard } from './KanbanBoard';
 import { WorkListView } from './WorkListView';
 import { CalendarView } from './CalendarView';
+import { CompleteTaskConfirmModal } from './CompleteTaskConfirmModal';
 import {
   Archive,
   RotateCcw,
@@ -137,9 +138,19 @@ export const ProjectDetail: React.FC<ProjectDetailProps> = ({
     return searchFilteredItems.filter((item) => item.type === 'note');
   }, [searchFilteredItems]);
 
+  const [confirmCompleteTask, setConfirmCompleteTask] = useState<Item | null>(null);
+
   const handleStatusChange = (taskId: string, newStatus: KanbanStatus) => {
     const task = items.find((i) => i.id === taskId);
     if (!task) return;
+
+    if (newStatus === 'done') {
+      const openSteps = task.steps?.filter((s) => s.text.trim().length > 0 && !s.completed);
+      if (openSteps && openSteps.length > 0) {
+        setConfirmCompleteTask(task);
+        return;
+      }
+    }
 
     const isDone = newStatus === 'done';
     onUpdateItem({
@@ -559,6 +570,39 @@ export const ProjectDetail: React.FC<ProjectDetailProps> = ({
           onAddItem={onAddItem}
           defaultProjectId={project.id}
           disableProjectPicker={true}
+        />
+      )}
+
+      {/* Confirmation Modal if Kanban moves task with open steps to Done */}
+      {confirmCompleteTask && (
+        <CompleteTaskConfirmModal
+          isOpen={Boolean(confirmCompleteTask)}
+          taskTitle={confirmCompleteTask.title}
+          uncompletedCount={
+            confirmCompleteTask.steps?.filter((s) => s.text.trim().length > 0 && !s.completed).length || 0
+          }
+          totalCount={confirmCompleteTask.steps?.filter((s) => s.text.trim().length > 0).length || 0}
+          onCompleteAll={() => {
+            const allDoneSteps = (confirmCompleteTask.steps || []).map((s) => ({ ...s, completed: true }));
+            onUpdateItem({
+              ...confirmCompleteTask,
+              status: 'done',
+              completed: true,
+              completedAt: new Date().toISOString(),
+              steps: allDoneSteps,
+            });
+            setConfirmCompleteTask(null);
+          }}
+          onCompleteTaskOnly={() => {
+            onUpdateItem({
+              ...confirmCompleteTask,
+              status: 'done',
+              completed: true,
+              completedAt: new Date().toISOString(),
+            });
+            setConfirmCompleteTask(null);
+          }}
+          onCancel={() => setConfirmCompleteTask(null)}
         />
       )}
     </div>

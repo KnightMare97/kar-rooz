@@ -94,6 +94,20 @@ export function sanitizeItemForFirestore(item: Item, userId: string) {
     dueDate: item.dueDate ? String(item.dueDate).slice(0, 10) : undefined,
     recurrence: item.recurrence ? cleanObject(item.recurrence) : undefined,
     occurrenceOverrides: item.occurrenceOverrides ? cleanObject(item.occurrenceOverrides) : undefined,
+    isDraft: item.isDraft !== undefined ? Boolean(item.isDraft) : undefined,
+    pinned: item.pinned !== undefined ? Boolean(item.pinned) : undefined,
+    color: item.color ? String(item.color) : undefined,
+    convertedToTaskId: item.convertedToTaskId ? String(item.convertedToTaskId) : undefined,
+    updatedAt: item.updatedAt || (item.isDraft ? new Date().toISOString() : undefined),
+    steps: Array.isArray(item.steps)
+      ? item.steps
+          .filter((s) => s && typeof s.text === 'string' && s.text.trim().length > 0)
+          .map((s) => ({
+            id: String(s.id),
+            text: String(s.text).trim(),
+            completed: Boolean(s.completed),
+          }))
+      : undefined,
   };
   return cleanObject(raw);
 }
@@ -180,6 +194,18 @@ export function subscribeToUserItems(
           dueDate: data.dueDate,
           recurrence: data.recurrence,
           occurrenceOverrides: data.occurrenceOverrides,
+          isDraft: data.isDraft,
+          pinned: data.pinned,
+          color: data.color,
+          convertedToTaskId: data.convertedToTaskId,
+          updatedAt: data.updatedAt,
+          steps: Array.isArray(data.steps)
+            ? data.steps.map((s: any) => ({
+                id: String(s.id),
+                text: String(s.text || ''),
+                completed: Boolean(s.completed),
+              }))
+            : undefined,
         });
       });
 

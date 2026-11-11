@@ -1,12 +1,13 @@
 import React from 'react';
 import { Item, Project } from '../types';
-import { Check, FileText, Calendar, Clock, AlertTriangle, Repeat } from 'lucide-react';
+import { Check, FileText, Calendar, Clock, AlertTriangle, Repeat, CheckSquare } from 'lucide-react';
 import {
   formatTimeAgo,
   formatJalaliDate,
   isPastDate,
   isTodayDate,
   getRelativeDateLabel,
+  toPersianDigits,
 } from '../utils/date';
 
 interface TaskCardProps {
@@ -197,6 +198,27 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               <span>تکرار</span>
             </button>
           )}
+
+          {/* Checklist Progress Badge - Tasks with steps only */}
+          {isTask && item.steps && item.steps.length > 0 && (() => {
+            const totalSteps = item.steps.length;
+            const doneSteps = item.steps.filter((s) => s.completed).length;
+            return (
+              <span
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-medium text-[10px] ${
+                  doneSteps === totalSteps
+                    ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/40'
+                    : 'bg-[#1E202C] text-gray-300 border border-[#2D3042]'
+                }`}
+                title={`مراحل انجام: ${toPersianDigits(doneSteps)} از ${toPersianDigits(totalSteps)}`}
+              >
+                <CheckSquare className="w-3 h-3 text-violet-400 shrink-0" />
+                <span>
+                  {toPersianDigits(doneSteps)}/{toPersianDigits(totalSteps)} مرحله
+                </span>
+              </span>
+            );
+          })()}
 
           {/* Quick "صرف‌نظر" action for recurring occurrences */}
           {item.isRecurringOccurrence && !isCompleted && onSkipOccurrence && (

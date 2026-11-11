@@ -435,6 +435,11 @@ export function expandSeriesOccurrences(
       inToday: actualPlannedDate === todayStr,
       destination: actualPlannedDate === todayStr ? 'today' : undefined,
 
+      // Independent steps per recurrence occurrence
+      steps: override?.steps !== undefined
+        ? override.steps
+        : (seriesItem.steps ? seriesItem.steps.map((s) => ({ ...s, completed: false })) : undefined),
+
       // Recurrence metadata
       isRecurringOccurrence: true,
       recurringSeriesId: seriesItem.id,

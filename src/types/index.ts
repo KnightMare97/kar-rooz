@@ -42,6 +42,12 @@ export interface RecurrenceRule {
   stoppedAt?: string; // YYYY-MM-DD cutoff date (inclusive: stopped on or after this date)
 }
 
+export interface TaskStep {
+  id: string; // stable unique ID
+  text: string; // step description
+  completed: boolean; // step completion state
+}
+
 export interface OccurrenceOverride {
   seriesId?: string;
   originalDate?: string; // Original scheduled YYYY-MM-DD date of this occurrence
@@ -56,6 +62,7 @@ export interface OccurrenceOverride {
   dueDate?: string;     // Overridden deadline (YYYY-MM-DD)
   projectId?: string;
   tags?: string[];
+  steps?: TaskStep[];   // Overridden steps for this specific occurrence
   updatedAt?: string;
 }
 
@@ -83,12 +90,26 @@ export interface Item {
   recurrence?: RecurrenceRule;
   occurrenceOverrides?: Record<string, OccurrenceOverride>;
 
+  // Checklist steps (Tasks only)
+  steps?: TaskStep[];
+
+  // Sticky Notes & Drafts
+  isDraft?: boolean; // Draft status ("پیش‌نویس")
+  pinned?: boolean; // Pinned to top ("سنجاق‌شده")
+  color?: StickyColor; // Subtle card tint color
+  convertedToTaskId?: string; // ID of the task created if converted
+  updatedAt?: string; // ISO string for conflict detection & sync sorting
+
   // In-Memory Expanded Occurrence Metadata (Computed during view expansion)
   isRecurringOccurrence?: boolean;
   recurringSeriesId?: string;
   originalScheduledDate?: string;
   isOccurrenceSkipped?: boolean;
 }
+
+export type StickyColor = 'default' | 'amber' | 'emerald' | 'blue' | 'rose';
+
+export type NotesFilterTab = 'all' | 'drafts' | 'pinned';
 
 export type FilterType = 'all' | 'tasks' | 'notes';
 

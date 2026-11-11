@@ -74,7 +74,13 @@ service cloud.firestore {
         && (!('dueDate' in data) || (data.dueDate is string && data.dueDate.size() <= 10))
         && (!('completedAt' in data) || (data.completedAt is string && data.completedAt.size() <= 64))
         && (!('recurrence' in data) || data.recurrence is map)
-        && (!('occurrenceOverrides' in data) || data.occurrenceOverrides is map);
+        && (!('occurrenceOverrides' in data) || data.occurrenceOverrides is map)
+        && (!('isDraft' in data) || data.isDraft is bool)
+        && (!('pinned' in data) || data.pinned is bool)
+        && (!('color' in data) || (data.color is string && data.color.size() <= 32))
+        && (!('convertedToTaskId' in data) || (data.convertedToTaskId is string && data.convertedToTaskId.size() <= 128))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && (!('steps' in data) || (data.steps is list && data.steps.size() <= 100));
     }
 
     // User collection and subcollections
@@ -122,7 +128,9 @@ service cloud.firestore {
             'id', 'userId', 'type', 'title', 'description', 'completed', 'status',
             'projectId', 'legacyProjectLabel', 'project', 'inToday', 'destination',
             'tags', 'createdAt', 'completedAt', 'plannedDate', 'dueDate',
-            'recurrence', 'occurrenceOverrides'
+            'recurrence', 'occurrenceOverrides',
+            'isDraft', 'pinned', 'color', 'convertedToTaskId', 'updatedAt',
+            'steps'
           ]);
         allow update: if isOwner(userId)
           && isValidId(itemId)

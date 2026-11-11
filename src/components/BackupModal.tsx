@@ -192,6 +192,17 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         occurrenceOverrides = { ...item.occurrenceOverrides };
       }
 
+      let steps = undefined;
+      if (Array.isArray(item.steps)) {
+        steps = item.steps
+          .filter((s: any) => s && typeof s === 'object' && typeof s.text === 'string' && s.text.trim())
+          .map((s: any, sIdx: number) => ({
+            id: String(s.id || `step-${idx}-${sIdx}`),
+            text: String(s.text).trim(),
+            completed: Boolean(s.completed),
+          }));
+      }
+
       return {
         id: String(item.id || `item-${Date.now()}-${idx}`),
         type: itemType,
@@ -211,6 +222,11 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         destination: item.destination === 'today' ? 'today' : undefined,
         recurrence,
         occurrenceOverrides,
+        steps: steps && steps.length > 0 ? steps : undefined,
+        isDraft: item.isDraft !== undefined ? Boolean(item.isDraft) : undefined,
+        pinned: item.pinned !== undefined ? Boolean(item.pinned) : undefined,
+        color: item.color ? String(item.color) : undefined,
+        convertedToTaskId: item.convertedToTaskId ? String(item.convertedToTaskId) : undefined,
       };
     });
 

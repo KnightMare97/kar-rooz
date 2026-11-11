@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Item, Project, KanbanStatus, KANBAN_COLUMNS } from '../types';
 import { StatusMenu } from './StatusMenu';
-import { Check, Repeat } from 'lucide-react';
+import { Check, Repeat, CheckSquare } from 'lucide-react';
 import { toPersianDigits } from '../utils/date';
 
 interface KanbanBoardProps {
@@ -126,6 +126,25 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                     <span>تکرار</span>
                   </span>
                 )}
+                {task.steps && task.steps.length > 0 && (() => {
+                  const totalSteps = task.steps.length;
+                  const doneSteps = task.steps.filter((s) => s.completed).length;
+                  return (
+                    <span
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded font-medium text-[10px] ${
+                        doneSteps === totalSteps
+                          ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/40'
+                          : 'bg-[#111218] text-gray-300 border border-[#232532]'
+                      }`}
+                      title={`مراحل انجام: ${toPersianDigits(doneSteps)} از ${toPersianDigits(totalSteps)}`}
+                    >
+                      <CheckSquare className="w-2.5 h-2.5 text-violet-400" />
+                      <span>
+                        {toPersianDigits(doneSteps)}/{toPersianDigits(totalSteps)} مرحله
+                      </span>
+                    </span>
+                  );
+                })()}
                 {task.inToday && (
                   <span className="text-violet-300 bg-violet-950/40 border border-violet-800/40 px-1.5 py-0.2 rounded font-medium">
                     در امروز

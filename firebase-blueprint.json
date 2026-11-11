@@ -148,6 +148,33 @@
           "type": "string",
           "description": "Deadline date YYYY-MM-DD",
           "maxLength": 10
+        },
+        "isDraft": {
+          "type": "boolean",
+          "description": "Draft status for quick notes"
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Pinned status for notes"
+        },
+        "color": {
+          "type": "string",
+          "description": "Sticky note tint color identifier",
+          "maxLength": 32
+        },
+        "convertedToTaskId": {
+          "type": "string",
+          "description": "ID of task created when note was converted",
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last update ISO timestamp",
+          "maxLength": 64
+        },
+        "steps": {
+          "type": "array",
+          "description": "Checklist of sub-steps for tasks"
         }
       },
       "required": ["id", "userId", "type", "title", "completed", "createdAt"]

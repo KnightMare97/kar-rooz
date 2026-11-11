@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Item, ItemType, Project, KanbanStatus, KANBAN_COLUMNS, RecurrenceRule } from '../types';
+import { Item, ItemType, Project, KanbanStatus, KANBAN_COLUMNS, RecurrenceRule, TaskStep } from '../types';
 import {
   X,
   Trash2,
@@ -17,6 +17,8 @@ import {
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { DatePickerModal } from './DatePickerModal';
 import { RecurrenceSection } from './RecurrenceSection';
+import { TaskStepsSection } from './TaskStepsSection';
+import { CompleteTaskConfirmModal } from './CompleteTaskConfirmModal';
 import {
   getTehranTodayDateString,
   getTomorrowDateString,
@@ -55,6 +57,8 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
   const [dueDate, setDueDate] = useState<string | undefined>(undefined);
   const [tagsInput, setTagsInput] = useState('');
   const [recurrence, setRecurrence] = useState<RecurrenceRule | undefined>(undefined);
+  const [steps, setSteps] = useState<TaskStep[]>([]);
+  const [isConfirmOpenStepsModalOpen, setIsConfirmOpenStepsModalOpen] = useState(false);
   const [error, setError] = useState('');
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
@@ -72,6 +76,8 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
       setDueDate(item.dueDate);
       setTagsInput(item.tags?.join('، ') || '');
       setRecurrence(item.recurrence);
+      setSteps(item.steps ? JSON.parse(JSON.stringify(item.steps)) : []);
+      setIsConfirmOpenStepsModalOpen(false);
       setError('');
       setIsDeleteConfirmOpen(false);
       setDatePickerTarget(null);
@@ -112,20 +118,26 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
   const isDateOrderInverted =
     type === 'task' && plannedDate && dueDate && plannedDate > dueDate;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) {
-      setError('عنوان نمی‌تواند خالی باشد.');
-      return;
+  const handleSelectStatus = (newStatus: KanbanStatus) => {
+    if (newStatus === 'done') {
+      const openSteps = steps.filter((s) => s.text.trim().length > 0 && !s.completed);
+      if (openSteps.length > 0) {
+        setIsConfirmOpenStepsModalOpen(true);
+        return;
+      }
     }
+    setStatus(newStatus);
+  };
 
+  const executeSave = (finalStatus: KanbanStatus, finalSteps: TaskStep[]) => {
     const parsedTags = tagsInput
       .split(/[,،]+/)
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
 
     const chosenProject = projects.find((p) => p.id === selectedProjectId);
-    const isDone = status === 'done';
+    const isDone = finalStatus === 'done';
+    const cleanSteps = finalSteps.filter((s) => s.text.trim().length > 0);
 
     const updatedItem: Item = {
       ...item,
@@ -143,15 +155,35 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
       destination: plannedDate === todayStr ? 'today' : undefined,
       // Recurrence rule (tasks only, notes do not recur)
       recurrence: type === 'task' && !item.isRecurringOccurrence ? recurrence : item.recurrence,
-      // Completion and status (status untouched when changing dates!)
+      // Completion and status
       completed: type === 'note' ? false : isDone,
-      status: type === 'task' ? status : undefined,
+      status: type === 'task' ? finalStatus : undefined,
       completedAt:
         type === 'task' && isDone ? item.completedAt || new Date().toISOString() : undefined,
+      // Steps: active on tasks, preserved if switched to note
+      steps: type === 'task' ? (cleanSteps.length > 0 ? cleanSteps : undefined) : item.steps,
     };
 
     onSave(updatedItem);
     onClose();
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError('عنوان نمی‌تواند خالی باشد.');
+      return;
+    }
+
+    const cleanSteps = steps.filter((s) => s.text.trim().length > 0);
+    const hasOpenSteps = cleanSteps.some((s) => !s.completed);
+
+    if (type === 'task' && status === 'done' && hasOpenSteps && !isConfirmOpenStepsModalOpen) {
+      setIsConfirmOpenStepsModalOpen(true);
+      return;
+    }
+
+    executeSave(status, steps);
   };
 
   const handleDeleteConfirm = () => {
@@ -449,7 +481,7 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                       <button
                         key={col.id}
                         type="button"
-                        onClick={() => setStatus(col.id)}
+                        onClick={() => handleSelectStatus(col.id)}
                         className={`flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
                           isSelected
                             ? 'bg-[#27243B] text-white border border-violet-500/40 shadow-xs'
@@ -466,6 +498,22 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
                   })}
                 </div>
               </div>
+            )}
+
+            {/* Task Checklist / Steps Section (Tasks Only) */}
+            {type === 'task' && (
+              <TaskStepsSection
+                steps={steps}
+                onChange={setSteps}
+                isTaskCompleted={status === 'done'}
+                onSetTaskStatus={(nextStatus) => {
+                  if (nextStatus === 'done') {
+                    handleSelectStatus('done');
+                  } else {
+                    setStatus(nextStatus);
+                  }
+                }}
+              />
             )}
 
             {/* Description Input */}
@@ -617,6 +665,29 @@ export const ItemEditorModal: React.FC<ItemEditorModalProps> = ({
           onClose={() => setDatePickerTarget(null)}
         />
       )}
+
+      {/* Confirmation modal if user completes task with open steps */}
+      <CompleteTaskConfirmModal
+        isOpen={isConfirmOpenStepsModalOpen}
+        taskTitle={title || item.title}
+        uncompletedCount={steps.filter((s) => s.text.trim().length > 0 && !s.completed).length}
+        totalCount={steps.filter((s) => s.text.trim().length > 0).length}
+        onCompleteAll={() => {
+          const allDoneSteps = steps.map((s) => ({ ...s, completed: true }));
+          setSteps(allDoneSteps);
+          setStatus('done');
+          setIsConfirmOpenStepsModalOpen(false);
+          executeSave('done', allDoneSteps);
+        }}
+        onCompleteTaskOnly={() => {
+          setStatus('done');
+          setIsConfirmOpenStepsModalOpen(false);
+          executeSave('done', steps);
+        }}
+        onCancel={() => {
+          setIsConfirmOpenStepsModalOpen(false);
+        }}
+      />
     </>
   );
 };

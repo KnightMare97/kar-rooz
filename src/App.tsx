@@ -11,6 +11,7 @@ import {
   ActiveView,
   KanbanStatus,
   WorkViewTab,
+  TaskStep,
   UNASSIGNED_PROJECT_ID,
 } from './types';
 import {
@@ -49,6 +50,7 @@ import { AuthModal } from './components/AuthModal';
 import { MigrationModal } from './components/MigrationModal';
 import { SettingsView } from './components/SettingsView';
 import { LoginView } from './components/LoginView';
+import { CompleteTaskConfirmModal } from './components/CompleteTaskConfirmModal';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import {
@@ -124,6 +126,14 @@ function AppContent() {
   const [selectedSeriesModalId, setSelectedSeriesModalId] = useState<string | null>(null);
   const [skipConfirmOccurrence, setSkipConfirmOccurrence] = useState<Item | null>(null);
   const [undoSkipInfo, setUndoSkipInfo] = useState<{ seriesId: string; originalDate: string; title: string } | null>(null);
+  const [completeConfirmTarget, setCompleteConfirmTarget] = useState<{
+    id: string;
+    title: string;
+    steps: TaskStep[];
+    isOccurrence: boolean;
+    seriesId?: string;
+    origDate?: string;
+  } | null>(null);
 
   const captureSectionRef = useRef<HTMLDivElement>(null);
 
@@ -315,21 +325,116 @@ function AppContent() {
     // Check if this is an occurrence ID (seriesId__originalDate)
     if (id.includes('__')) {
       const [seriesId, origDate] = id.split('__');
+      const parent = items.find((i) => i.id === seriesId);
+      if (!parent) return;
+
+      const currentOverride = parent.occurrenceOverrides?.[origDate];
+      const isCurrentlyCompleted = Boolean(currentOverride?.completed ?? parent.completed);
+      const nextCompleted = !isCurrentlyCompleted;
+
+      // If user is completing the task, check for open steps
+      if (nextCompleted) {
+        const steps = currentOverride?.steps ?? parent.steps;
+        const openSteps = steps?.filter((s) => s.text.trim().length > 0 && !s.completed);
+        if (steps && openSteps && openSteps.length > 0) {
+          setCompleteConfirmTarget({
+            id,
+            title: currentOverride?.title || parent.title,
+            steps,
+            isOccurrence: true,
+            seriesId,
+            origDate,
+          });
+          return;
+        }
+      }
+
+      const nextStatus: KanbanStatus = nextCompleted ? 'done' : 'todo';
+      const updatedItem: Item = {
+        ...parent,
+        occurrenceOverrides: {
+          ...(parent.occurrenceOverrides || {}),
+          [origDate]: {
+            ...(currentOverride || {}),
+            completed: nextCompleted,
+            status: nextStatus,
+            completedAt: nextCompleted ? new Date().toISOString() : undefined,
+          },
+        },
+      };
+
+      if (user) {
+        setSyncStatus('syncing');
+        saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+          console.error('Firestore save error:', err);
+          setSyncStatus('error');
+        });
+      }
+
+      setItems((prev) => prev.map((item) => (item.id === seriesId ? updatedItem : item)));
+      return;
+    }
+
+    const task = items.find((i) => i.id === id);
+    if (!task || task.type !== 'task') return;
+
+    const nextCompleted = !task.completed;
+
+    // If user is completing the task, check for open steps
+    if (nextCompleted) {
+      const openSteps = task.steps?.filter((s) => s.text.trim().length > 0 && !s.completed);
+      if (task.steps && openSteps && openSteps.length > 0) {
+        setCompleteConfirmTarget({
+          id,
+          title: task.title,
+          steps: task.steps,
+          isOccurrence: false,
+        });
+        return;
+      }
+    }
+
+    const nextStatus: KanbanStatus = nextCompleted ? 'done' : 'todo';
+    const updatedItem: Item = {
+      ...task,
+      completed: nextCompleted,
+      status: nextStatus,
+      completedAt: nextCompleted ? new Date().toISOString() : undefined,
+    };
+
+    if (user) {
+      setSyncStatus('syncing');
+      saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+        console.error('Firestore save error:', err);
+        setSyncStatus('error');
+      });
+    }
+
+    setItems((prev) => prev.map((item) => (item.id === id ? updatedItem : item)));
+  };
+
+  const handleConfirmCompleteAll = () => {
+    if (!completeConfirmTarget) return;
+
+    const allDoneSteps = completeConfirmTarget.steps.map((s) => ({ ...s, completed: true }));
+
+    if (completeConfirmTarget.isOccurrence && completeConfirmTarget.seriesId && completeConfirmTarget.origDate) {
+      const seriesId = completeConfirmTarget.seriesId;
+      const origDate = completeConfirmTarget.origDate;
       setItems((prev) =>
         prev.map((item) => {
           if (item.id === seriesId) {
-            const currentOverride = item.occurrenceOverrides?.[origDate];
-            const nextCompleted = !(currentOverride?.completed ?? item.completed);
-            const nextStatus: KanbanStatus = nextCompleted ? 'done' : 'todo';
+            const currentOverride = item.occurrenceOverrides?.[origDate] || {};
             const updatedItem: Item = {
               ...item,
               occurrenceOverrides: {
                 ...(item.occurrenceOverrides || {}),
                 [origDate]: {
-                  ...(currentOverride || {}),
-                  completed: nextCompleted,
-                  status: nextStatus,
-                  completedAt: nextCompleted ? new Date().toISOString() : undefined,
+                  ...currentOverride,
+                  completed: true,
+                  status: 'done',
+                  completedAt: new Date().toISOString(),
+                  steps: allDoneSteps,
                 },
               },
             };
@@ -347,34 +452,99 @@ function AppContent() {
           return item;
         })
       );
-      return;
+    } else {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id === completeConfirmTarget.id) {
+            const updatedItem: Item = {
+              ...item,
+              completed: true,
+              status: 'done',
+              completedAt: new Date().toISOString(),
+              steps: allDoneSteps,
+            };
+
+            if (user) {
+              setSyncStatus('syncing');
+              saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+                console.error('Firestore save error:', err);
+                setSyncStatus('error');
+              });
+            }
+
+            return updatedItem;
+          }
+          return item;
+        })
+      );
     }
 
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item.id === id && item.type === 'task') {
-          const nextCompleted = !item.completed;
-          const nextStatus: KanbanStatus = nextCompleted ? 'done' : 'todo';
-          const updatedItem: Item = {
-            ...item,
-            completed: nextCompleted,
-            status: nextStatus,
-            completedAt: nextCompleted ? new Date().toISOString() : undefined,
-          };
+    setCompleteConfirmTarget(null);
+  };
 
-          if (user) {
-            setSyncStatus('syncing');
-            saveFirestoreItem(user.uid, updatedItem).catch((err) => {
-              console.error('Firestore save error:', err);
-              setSyncStatus('error');
-            });
+  const handleConfirmCompleteTaskOnly = () => {
+    if (!completeConfirmTarget) return;
+
+    if (completeConfirmTarget.isOccurrence && completeConfirmTarget.seriesId && completeConfirmTarget.origDate) {
+      const seriesId = completeConfirmTarget.seriesId;
+      const origDate = completeConfirmTarget.origDate;
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id === seriesId) {
+            const currentOverride = item.occurrenceOverrides?.[origDate] || {};
+            const updatedItem: Item = {
+              ...item,
+              occurrenceOverrides: {
+                ...(item.occurrenceOverrides || {}),
+                [origDate]: {
+                  ...currentOverride,
+                  completed: true,
+                  status: 'done',
+                  completedAt: new Date().toISOString(),
+                },
+              },
+            };
+
+            if (user) {
+              setSyncStatus('syncing');
+              saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+                console.error('Firestore save error:', err);
+                setSyncStatus('error');
+              });
+            }
+
+            return updatedItem;
           }
+          return item;
+        })
+      );
+    } else {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id === completeConfirmTarget.id) {
+            const updatedItem: Item = {
+              ...item,
+              completed: true,
+              status: 'done',
+              completedAt: new Date().toISOString(),
+            };
 
-          return updatedItem;
-        }
-        return item;
-      })
-    );
+            if (user) {
+              setSyncStatus('syncing');
+              saveFirestoreItem(user.uid, updatedItem).catch((err) => {
+                console.error('Firestore save error:', err);
+                setSyncStatus('error');
+              });
+            }
+
+            return updatedItem;
+          }
+          return item;
+        })
+      );
+    }
+
+    setCompleteConfirmTarget(null);
   };
 
   const handleSaveItem = (updatedItem: Item) => {
@@ -401,6 +571,7 @@ function AppContent() {
                   dueDate: updatedItem.dueDate,
                   projectId: updatedItem.projectId,
                   tags: updatedItem.tags,
+                  steps: updatedItem.steps,
                 },
               },
             };
@@ -965,14 +1136,17 @@ function AppContent() {
             />
           )}
 
-          {/* VIEW 3: NOTES VIEW */}
+          {/* VIEW 3: NOTES VIEW (Sticky Notes & Drafts) */}
           {activeView === 'notes' && (
             <NotesView
               items={items}
               projects={projects}
               isSimpleMode={isSimpleMode}
               onAddItem={handleAddItem}
+              onUpdateItem={handleSaveItem}
+              onDeleteItem={handleDeleteItem}
               onSelectItem={(item) => setEditingItem(item)}
+              onShowToast={showToast}
             />
           )}
 
@@ -1184,6 +1358,21 @@ function AppContent() {
           collidingCount={migrationModalState.collidingCount}
           onMigrate={handleExecuteMigration}
           onDismissWithoutMigration={handleDismissMigration}
+        />
+      )}
+
+      {/* Task Completion Confirmation Modal for Open Steps */}
+      {completeConfirmTarget && (
+        <CompleteTaskConfirmModal
+          isOpen={Boolean(completeConfirmTarget)}
+          taskTitle={completeConfirmTarget.title}
+          uncompletedCount={
+            completeConfirmTarget.steps.filter((s) => s.text.trim().length > 0 && !s.completed).length
+          }
+          totalCount={completeConfirmTarget.steps.filter((s) => s.text.trim().length > 0).length}
+          onCompleteAll={handleConfirmCompleteAll}
+          onCompleteTaskOnly={handleConfirmCompleteTaskOnly}
+          onCancel={() => setCompleteConfirmTarget(null)}
         />
       )}
 
